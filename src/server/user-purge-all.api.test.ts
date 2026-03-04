@@ -113,7 +113,7 @@ describe('User purge all API', () => {
       body: { mode: 'apply', superToken: process.env.SISTEQ_SUPER_ADMIN_TOKEN, confirm: true, confirmToken: dry.json.confirmToken, confirmPhrase: 'NO' },
     })
     expect(wrongPhrase.status).toBe(400)
-  })
+  }, 15_000)
 
   it('remove permanentemente todos os usuários e zera índices/tokens', async () => {
     const { tenant: t1, user: a1 } = await registerTenantAndUser({

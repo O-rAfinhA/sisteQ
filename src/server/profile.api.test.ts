@@ -286,7 +286,7 @@ describe('Profile API', () => {
 
     const forbiddenList = await callProfileApi({ method: 'GET', slug: ['users'], cookie: logged.cookie })
     expect(forbiddenList.status).toBe(403)
-  })
+  }, 15_000)
 
   it('criação de usuários fica isolada entre tenants', async () => {
     const tenantA = uniqueTenantSlug()

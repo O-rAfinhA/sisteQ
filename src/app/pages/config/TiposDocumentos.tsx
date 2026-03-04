@@ -6,7 +6,7 @@ import { Badge } from '../../components/ui/badge';
 import { MetricCard } from '../../components/ui/metric-card';
 import { InfoBox } from '../../components/InfoBox';
 import { toast } from 'sonner';
-import { generateId, getFromStorage } from '../../utils/helpers';
+import { generateId, getFromStorage, persistKvKeyNow } from '../../utils/helpers';
 import { formatarDataHoje } from '../../utils/formatters';
 
 export interface TipoDocumento {
@@ -1131,6 +1131,7 @@ export function TiposDocumentos() {
       if (novoData.length === 0 && antigoData.length > 0) {
         // Migrar dados do storage antigo para o novo
         localStorage.setItem(categoriaConfig.storageKey, JSON.stringify(antigoData));
+        persistKvKeyNow(categoriaConfig.storageKey);
       }
     }
 
@@ -1141,6 +1142,7 @@ export function TiposDocumentos() {
       const tiposExemplo: TipoDocumento[] = categoriaConfig.exemplos || [];
       setTipos(tiposExemplo);
       localStorage.setItem(categoriaConfig.storageKey, JSON.stringify(tiposExemplo));
+      persistKvKeyNow(categoriaConfig.storageKey);
     } else {
       setTipos(dadosCarregados);
     }
@@ -1148,7 +1150,10 @@ export function TiposDocumentos() {
 
   // Salvar no localStorage
   const saveToLocalStorage = (data: TipoDocumento[]) => {
-    localStorage.setItem(CATEGORIAS.find(c => c.key === categoriaSelecionada)?.storageKey || '', JSON.stringify(data));
+    const storageKey = CATEGORIAS.find(c => c.key === categoriaSelecionada)?.storageKey;
+    if (!storageKey) return;
+    localStorage.setItem(storageKey, JSON.stringify(data));
+    persistKvKeyNow(storageKey);
   };
 
   const resetForm = () => {

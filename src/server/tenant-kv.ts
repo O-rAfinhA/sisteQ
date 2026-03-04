@@ -89,11 +89,11 @@ function assertKey(key: unknown): asserts key is string {
 }
 
 function assertPayloadSize(value: unknown) {
-  const maxBytes = process.env.SISTEQ_KV_MAX_BYTES ? Number(process.env.SISTEQ_KV_MAX_BYTES) : 1_500_000
-  const safeMax = Number.isFinite(maxBytes) && maxBytes > 0 ? Math.min(maxBytes, 5_000_000) : 1_500_000
+  const maxBytes = process.env.SISTEQ_KV_MAX_BYTES ? Number(process.env.SISTEQ_KV_MAX_BYTES) : 5_000_000
+  const safeMax = Number.isFinite(maxBytes) && maxBytes > 0 ? Math.min(maxBytes, 5_000_000) : 5_000_000
   const bytes = Buffer.byteLength(JSON.stringify(value ?? null), 'utf8')
   if (bytes > safeMax) {
-    const err: any = new Error('payload grande demais')
+    const err: any = new Error(`payload grande demais (${bytes} > ${safeMax} bytes)`)
     err.status = 413
     throw err
   }

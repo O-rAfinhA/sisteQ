@@ -37,7 +37,7 @@ import { LogAuditoriaModal } from '../components/documentos/LogAuditoriaModal';
 import { ModalDescricaoAlteracoes } from '../components/documentos/ModalDescricaoAlteracoes';
 import { TiptapEditor } from '../components/documentos/TiptapEditor';
 import { formatarDataPtBr, dataHojeISO, formatarTamanhoArquivo } from '../utils/formatters';
-import { generateId, getFromStorage } from '../utils/helpers';
+import { generateId, getFromStorage, persistKvKeyNow } from '../utils/helpers';
 
 // v2.3 - Implementado campo de descrição de alterações para nova revisão
 
@@ -502,6 +502,14 @@ export default function DocumentoInternoEditor() {
     }
 
     localStorage.setItem(STORAGE_KEY, JSON.stringify(docs));
+    persistKvKeyNow(STORAGE_KEY).then(result => {
+      if (result.ok) return;
+      if (result.status === 413) {
+        toast.error('Arquivo/anexo muito grande para persistir no servidor. Reduza o tamanho do arquivo.');
+        return;
+      }
+      toast.error('Falha ao persistir no servidor. Os dados ficaram apenas no navegador.');
+    });
     
     if (!docToSave) {
       toast.success('Documento salvo com sucesso!');

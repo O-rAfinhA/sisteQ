@@ -278,6 +278,35 @@ export function removeFromStorage(key: string): void {
   }
 }
 
+export async function persistKvKeyNow(key: string): Promise<{ ok: boolean; status?: number; error?: string }> {
+  if (typeof window === 'undefined') return { ok: false, error: 'no_window' };
+  if (typeof fetch !== 'function') return { ok: false, error: 'no_fetch' };
+  try {
+    const raw = typeof localStorage?.getItem === 'function' ? localStorage.getItem(key) : null;
+    const value = (() => {
+      if (raw == null) return null;
+      try {
+        return JSON.parse(raw);
+      } catch {
+        return raw;
+      }
+    })();
+
+    const res = await fetch('/api/profile/kv', {
+      method: 'PUT',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ key, value }),
+    });
+
+    if (res.ok) return { ok: true };
+    const json = await res.json().catch(() => null);
+    return { ok: false, status: res.status, error: String(json?.error || res.statusText || 'Erro ao persistir') };
+  } catch (e: any) {
+    return { ok: false, error: String(e?.message || e) };
+  }
+}
+
 const TENANT_ID_SESSION_KEY = 'sisteq:tenantId';
 const TENANT_SHIM_KEY = '__SISTEQ_TENANT_SHIM__';
 const LEGACY_OWNER_TENANT_KEY = '__SISTEQ_LEGACY_OWNER_TENANT__';

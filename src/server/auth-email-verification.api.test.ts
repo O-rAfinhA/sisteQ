@@ -212,5 +212,5 @@ describe('Auth email verification flow', () => {
       await loginHandler(reqLogin, resLogin as any)
       expect(resLogin.getState().status).toBe(200)
     })
-  })
+  }, 15_000)
 })

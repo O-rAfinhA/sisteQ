@@ -20,9 +20,8 @@ import { toast } from 'sonner';
 import { DocumentoCliente } from './DocumentosClientesNovo';
 import { TipoDocumento } from './config/TiposDocumentos';
 import { useProcessos } from '../hooks/useProcessos';
-import { generateId } from '../utils/helpers';
+import { generateId, getFromStorage, persistKvKeyNow } from '../utils/helpers';
 import { formatarDataPtBr, dataHojeISO, formatarTamanhoArquivo } from '../utils/formatters';
-import { getFromStorage } from '../utils/helpers';
 
 const STORAGE_KEY = 'sisteq-docs-clientes';
 
@@ -181,6 +180,14 @@ export default function DocumentoClienteEditor() {
     }
 
     localStorage.setItem(STORAGE_KEY, JSON.stringify(docs));
+    persistKvKeyNow(STORAGE_KEY).then(result => {
+      if (result.ok) return;
+      if (result.status === 413) {
+        toast.error('Arquivo/anexo muito grande para persistir no servidor. Reduza o tamanho do arquivo.');
+        return;
+      }
+      toast.error('Falha ao persistir no servidor. Os dados ficaram apenas no navegador.');
+    });
     toast.success('Documento salvo com sucesso!');
     navigate('/documentos/clientes');
   };

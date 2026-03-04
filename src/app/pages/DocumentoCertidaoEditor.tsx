@@ -17,7 +17,7 @@ import { toast } from 'sonner';
 import { DocumentoCertidao } from './DocumentosCertidoes';
 import { TipoDocumento } from './config/TiposDocumentos';
 import { useProcessos } from '../hooks/useProcessos';
-import { generateId, getFromStorage } from '../utils/helpers';
+import { generateId, getFromStorage, persistKvKeyNow } from '../utils/helpers';
 import { formatarDataPtBr, dataHojeISO } from '../utils/formatters';
 
 const STORAGE_KEY = 'sisteq-docs-certidoes';
@@ -179,6 +179,14 @@ export default function DocumentoCertidaoEditor() {
     }
 
     localStorage.setItem(STORAGE_KEY, JSON.stringify(docs));
+    persistKvKeyNow(STORAGE_KEY).then(result => {
+      if (result.ok) return;
+      if (result.status === 413) {
+        toast.error('Arquivo/anexo muito grande para persistir no servidor. Reduza o tamanho do arquivo.');
+        return;
+      }
+      toast.error('Falha ao persistir no servidor. Os dados ficaram apenas no navegador.');
+    });
     toast.success(isEditMode ? 'Certidão atualizada!' : 'Certidão criada!');
     navigate('/documentos/certidoes');
   };
