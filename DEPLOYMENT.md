@@ -1,175 +1,116 @@
 # Deployment (DigitalOcean) — SisteQ
 
-## Arquitetura de produção
+Este repositório suporta dois caminhos de deploy:
 
-- App: Next.js 15 (server + API routes) em container Docker
-- Banco: PostgreSQL 16 em container Docker
-- Proxy/SSL: Caddy (Let’s Encrypt automático)
-- Backups: pg_dump agendado (diário/semana/mês) para volume dedicado
-- Observabilidade:
-  - Logs centralizados: Loki + Promtail
-  - Visualização: Grafana (subdomínio `grafana`)
-- Deploy zero downtime (single-node): Docker Swarm com `update_config: start-first` + 2 réplicas do app
+- **Hospedagem Gerenciada (App Platform)**: recomendado para deploy automatizado e gerenciamento simplificado.
+- **Droplet + Docker Swarm**: alternativa auto-gerenciada com stack completa (Caddy/DB/observabilidade).
 
-## Requisitos
+## Opção recomendada: App Platform (Hospedagem Gerenciada)
 
-- Droplet Ubuntu 22.04+ (recomendado: 2 vCPU / 4 GB RAM mínimo)
-- Domínio (DNS) apontando para o IP do Droplet
-- GitHub repo com Actions habilitado
+### Container, portas e rotas
 
-## Variáveis de ambiente (produção)
+- A aplicação é **Next.js 15** (server + API routes) empacotada em Docker com `output: 'standalone'`.
+- A App Platform roteia tráfego HTTP para o **http_port** do componente.
+- O container precisa escutar em **0.0.0.0** e na porta informada em `PORT`.
 
-Crie um arquivo `.env` no servidor (ex.: `/opt/sisteq/.env`) com:
+Arquivos relevantes:
 
-- `SISTEQ_DOMAIN` (ex.: `app.suaempresa.com`)
-- `CADDY_EMAIL` (e-mail para Let’s Encrypt)
-- `DATABASE_URL` (ex.: `postgresql://sisteq:senha@postgres:5432/sisteq?sslmode=disable`)
-- `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`
+- Dockerfile: `Dockerfile`
+- Healthcheck: `GET /api/health`
+- App spec (App Platform): `.do/app.yaml`
+
+Em `.do/app.yaml`, mantenha consistente:
+
+- `services[0].http_port: 3000`
+- `health_check.http_path: /api/health`
+- `ingress.rules.match.path.prefix: /`
+
+### Variáveis de ambiente (produção)
+
+Obrigatórias:
+
+- `DATABASE_URL` (PostgreSQL). Para Managed DB da DigitalOcean, use SSL (`sslmode=require`) ou configure `PGSSLMODE=require`.
 - `SISTEQ_PROFILE_STORE=pg`
-- `SISTEQ_SESSION_SECRET` (obrigatório, forte)
-- `SISTEQ_JWT_SECRET` (recomendado, forte)
-- `SISTEQ_SUPER_ADMIN_TOKEN` (se usar rotas administrativas “super”)
-- `OPENROUTER_API_KEY` (se usar IA)
-- Google OAuth (opcional):
+- `SISTEQ_SESSION_SECRET` (forte)
+
+Recomendadas:
+
+- `SISTEQ_JWT_SECRET` (se não definido, usa `SISTEQ_SESSION_SECRET`)
+- `PGSSLMODE=require` (quando o banco exigir SSL)
+
+Opcionais (dependem de features):
+
+- `SISTEQ_SUPER_ADMIN_TOKEN`
+- `OPENROUTER_API_KEY`
+- Google OAuth:
   - `SISTEQ_GOOGLE_CLIENT_ID`
   - `SISTEQ_GOOGLE_CLIENT_SECRET`
-  - `SISTEQ_GOOGLE_REDIRECT_URI` (opcional; padrão usa `https://<host>/api/auth/google/callback`)
-- Logs/DB tuning (opcional):
+  - `SISTEQ_GOOGLE_REDIRECT_URI` (se não definido, usa `https://<host>/api/auth/google/callback`)
+- Ajustes de pool/retentativas:
   - `SISTEQ_DB_LOGS=1`
-  - `PGPOOL_MAX=10`
-  - `PGPOOL_IDLE_MS=30000`
-  - `PGPOOL_CONN_TIMEOUT_MS=5000`
-  - `PG_TX_RETRIES=2`
-- Backups (opcional, com defaults):
-  - `PG_BACKUP_SCHEDULE=0 3 * * *`
-  - `PG_BACKUP_KEEP_DAYS=7`
-  - `PG_BACKUP_KEEP_WEEKS=4`
-  - `PG_BACKUP_KEEP_MONTHS=6`
-- Grafana:
-  - `GRAFANA_ADMIN_USER=admin`
-  - `GRAFANA_ADMIN_PASSWORD` (obrigatório)
+  - `PGPOOL_MAX`, `PGPOOL_IDLE_MS`, `PGPOOL_CONN_TIMEOUT_MS`, `PG_TX_RETRIES`
 
-## Bootstrap no Droplet
+### Banco de dados (serviços dependentes)
 
-1) Instale Docker:
+- Para App Platform, prefira **Managed PostgreSQL** e injete `DATABASE_URL` na App Platform.
+- Garanta que o banco esteja acessível pela App Platform (mesma conta/projeto, regras de rede/VPC quando aplicável).
+- Se o banco exigir SSL, use `DATABASE_URL` com `sslmode=require` ou `PGSSLMODE=require`.
 
-```bash
-curl -fsSL https://get.docker.com | sh
-sudo usermod -aG docker $USER
-newgrp docker
-```
+### Build e start (Dockerfile)
 
-2) Inicialize Swarm (single-node):
+- O build é feito via `next build` e o runtime usa o bundle `standalone`.
+- O start do container executa `node server.js` (gerado pelo Next no build).
+
+### Teste local do container (pré-deploy)
+
+Com Docker instalado:
 
 ```bash
-docker swarm init
+docker build -t sisteq:local .
+docker run --rm -p 3000:3000 \
+  -e NODE_ENV=production \
+  -e HOSTNAME=0.0.0.0 \
+  -e PORT=3000 \
+  -e NEXT_TELEMETRY_DISABLED=1 \
+  -e SISTEQ_PROFILE_STORE=pg \
+  -e PGSSLMODE=require \
+  -e DATABASE_URL="postgresql://USER:PASSWORD@HOST:5432/DB?sslmode=require" \
+  -e SISTEQ_SESSION_SECRET="troque-por-um-segredo-forte" \
+  sisteq:local
+curl -fsS http://127.0.0.1:3000/api/health
 ```
 
-3) Copie o projeto (ou ao menos a pasta `deploy/` + `deploy/stack.yml`) para o servidor.
+## Alternativa: Droplet + Docker Swarm (auto-gerenciado)
 
-Recomendação de path:
+### Arquitetura de produção
 
-```bash
-sudo mkdir -p /opt/sisteq
-sudo chown -R $USER:$USER /opt/sisteq
-```
+- App: Next.js 15 em container Docker
+- Banco: PostgreSQL 16 em container Docker
+- Proxy/SSL: Caddy
+- Observabilidade: Loki + Promtail + Grafana + Prometheus + cAdvisor
 
-4) Crie `/opt/sisteq/.env` com os valores acima.
+### Bootstrap no Droplet (resumo)
 
-5) Suba a stack:
+- Arquivo de stack: `deploy/stack.yml`
+- Workflow de deploy: `.github/workflows/deploy.yml`
 
-```bash
-cd /opt/sisteq
-set -a && . ./.env && set +a
-export SISTEQ_IMAGE="ghcr.io/<owner>/<repo>:latest"
-docker stack deploy -c deploy/stack.yml sisteq --with-registry-auth
-```
+## CI/CD e validações
 
-## DNS, domínio e SSL
+- CI: `.github/workflows/ci.yml` valida lint/typecheck/test/build e faz smoke-test do container com `GET /api/health`.
 
-Crie registros DNS:
+## Checklist pré-deploy (App Platform)
 
-- `A` para `SISTEQ_DOMAIN` → IP do Droplet
-- `A` para `grafana.SISTEQ_DOMAIN` → IP do Droplet
-
-O Caddy emite e renova certificados automaticamente (porta 80/443 abertas).
-
-## Firewall e proteção DDoS
-
-- DigitalOcean Cloud Firewall:
-  - Allow inbound: 22 (restrito ao seu IP), 80, 443
-  - Allow outbound: default
-- No servidor (opcional, UFW):
-
-```bash
-sudo ufw allow OpenSSH
-sudo ufw allow 80/tcp
-sudo ufw allow 443/tcp
-sudo ufw enable
-```
-
-- DDoS:
-  - Use Cloudflare (proxy ativado) na frente do domínio para proteção L7 + cache/CDN
-  - DigitalOcean oferece mitigação L3/L4 na infra
-
-## CDN e cache
-
-- Cloudflare recomendado:
-  - “Proxied” (laranja) para `SISTEQ_DOMAIN`
-  - Cache padrão para assets estáticos (Next já usa cache agressivo em `/_next/static`)
-- No Caddy, compressão `zstd/gzip` já habilitada em `deploy/Caddyfile`.
-
-## Backups e restore
-
-- Backups automáticos são gravados no volume `pg_backups`.
-- Listar backups no servidor:
-
-```bash
-docker volume inspect sisteq_pg_backups
-```
-
-- Restore (exemplo com arquivo `.sql.gz`):
-
-```bash
-gunzip -c /path/do/backup.sql.gz | docker exec -i $(docker ps -q -f name=sisteq_postgres) psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"
-```
-
-Recomendação: sincronizar o volume `pg_backups` para um storage externo (ex.: DigitalOcean Spaces) via job/cron do host para offsite.
-
-## Observabilidade (logs centralizados)
-
-- Grafana: `https://grafana.<SISTEQ_DOMAIN>`
-- Datasource Loki já provisionado (logs do Docker via Promtail).
-- Logs do app são emitidos em JSON no stdout; Caddy também.
-
-## CI/CD (GitHub Actions)
-
-Arquivos:
-
-- CI: `.github/workflows/ci.yml`
-- Deploy: `.github/workflows/deploy.yml`
-
-Secrets necessários no GitHub:
-
-- `DO_SSH_HOST` (IP ou hostname do Droplet)
-- `DO_SSH_USER` (ex.: `root` ou usuário com Docker)
-- `DO_SSH_KEY` (chave privada SSH)
-- `DO_DEPLOY_PATH` (ex.: `/opt/sisteq`)
-- `GHCR_TOKEN` (PAT com `read:packages` para o `docker login` no servidor)
-
-O deploy publica imagem no GHCR e aplica `docker stack deploy` com rolling update `start-first`.
-
-## Teste de carga (smoke)
-
-Script: `load/k6-smoke.js`
-
-Executar localmente via Docker:
-
-```bash
-docker run --rm -i grafana/k6 run -e BASE_URL="https://<SISTEQ_DOMAIN>" - < load/k6-smoke.js
-```
-
-## Healthcheck e rollout
-
-- Endpoint: `GET /api/health`
-- Swarm só troca instâncias quando o healthcheck passa, reduzindo downtime durante deploy.
+- Validar `.do/app.yaml`:
+  - `repo` aponta para o repositório correto
+  - `http_port` e `PORT` batem com o servidor (padrão deste projeto: 3000)
+  - `health_check.http_path` está em `/api/health`
+  - `ingress.rules` encaminha `prefix: /` para o componente `web`
+- Confirmar variáveis obrigatórias na App Platform:
+  - `DATABASE_URL` aponta para o Managed PostgreSQL e usa SSL (`sslmode=require`) ou `PGSSLMODE=require`
+  - `SISTEQ_PROFILE_STORE=pg`
+  - `SISTEQ_SESSION_SECRET` definido e forte
+- Validar conectividade com o banco:
+  - `GET /api/health` retorna `{ ok: true, db: "ok" }` após o banco estar configurado
+- Validar build e runtime do container:
+  - `docker build` sem erros
+  - `docker run` sobe e responde em `GET /api/health`

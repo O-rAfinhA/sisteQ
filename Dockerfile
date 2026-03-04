@@ -15,7 +15,6 @@ FROM node:22-bookworm-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
-ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 
 RUN useradd -r -u 1001 nodejs && mkdir -p /app && chown -R nodejs:nodejs /app

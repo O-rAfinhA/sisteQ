@@ -21,3 +21,28 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+
+      - name: Docker build
+        run: docker build -t sisteq-ci:${{ github.sha }} .
+
+      - name: Docker run (healthcheck)
+        run: |
+          cid="$(docker run -d --rm -p 3000:3000 \
+            -e NODE_ENV=production \
+            -e NEXT_TELEMETRY_DISABLED=1 \
+            -e HOSTNAME=0.0.0.0 \
+            -e PORT=3000 \
+            -e SISTEQ_PROFILE_STORE=file \
+            -e SISTEQ_SESSION_SECRET=test-secret \
+            sisteq-ci:${{ github.sha }})"
+
+          for i in $(seq 1 30); do
+            if curl -fsS "http://127.0.0.1:3000/api/health" >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+
+          curl -fsS "http://127.0.0.1:3000/api/health"
+          docker logs "$cid" --tail 200
+          docker stop "$cid"
