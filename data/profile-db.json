@@ -1,0 +1,77 @@
+{
+  "users": {
+    "default": {
+      "profile": {
+        "id": "default",
+        "name": "João Silva",
+        "email": "joao.silva@empresa.com.br",
+        "role": "Administrador",
+        "avatarUrl": "https://api.dicebear.com/7.x/avataaars/svg?seed=JoaoSilva",
+        "updatedAt": "2026-02-28T18:24:02.225Z"
+      },
+      "preferences": {
+        "theme": "system",
+        "language": "pt-BR",
+        "compactMode": false,
+        "updatedAt": "2026-02-28T18:24:02.225Z"
+      },
+      "notifications": {
+        "email": true,
+        "inApp": true,
+        "marketing": false,
+        "digestFrequency": "weekly",
+        "updatedAt": "2026-02-28T18:24:02.225Z"
+      },
+      "privacy": {
+        "showEmail": false,
+        "showProfileTo": "all",
+        "updatedAt": "2026-02-28T18:24:02.225Z"
+      },
+      "passwordSalt": "0f622add10d0a9374e775575a7a5359e",
+      "passwordHash": "102682ffaff09ded3189d589ca7fe3e5de102749dd59bbc3cf31dbd52425895440b194f2fae6eadc7a95bab1c3a1dae7047c52a96f60767e5595296eb076584a",
+      "activity": [
+        {
+          "id": "d57b0799-a6ac-4e09-92fd-8c8d897571de",
+          "type": "PROFILE_UPDATED",
+          "description": "Perfil inicial criado",
+          "createdAt": "2026-02-28T18:24:02.225Z"
+        }
+      ]
+    }
+  },
+  "sessions": {
+    "d8d43824-c7ba-4d8d-b42e-57a9ca0b863e": {
+      "userId": "default",
+      "createdAt": "2026-02-28T18:24:02.449Z"
+    },
+    "83ed45a0-5b8e-4748-b577-5b93842e4fe4": {
+      "userId": "default",
+      "createdAt": "2026-02-28T18:24:02.462Z"
+    },
+    "583f1c18-840d-4e11-b044-dcb873c2b70e": {
+      "userId": "default",
+      "createdAt": "2026-02-28T18:24:02.477Z"
+    },
+    "eced7438-bf63-4455-9eb0-005f83e3cdb9": {
+      "userId": "default",
+      "createdAt": "2026-02-28T18:24:02.486Z"
+    },
+    "a80966e5-f2f8-4e8f-bb30-dd216bcb8a22": {
+      "userId": "default",
+      "createdAt": "2026-02-28T18:24:02.508Z"
+    },
+    "bce38348-44a0-4675-ab8a-f59c88e262f1": {
+      "userId": "default",
+      "createdAt": "2026-02-28T18:24:02.518Z"
+    },
+    "690e3003-3e17-4bad-8c62-1578073a1a01": {
+      "userId": "default",
+      "createdAt": "2026-02-28T18:24:02.528Z"
+    },
+    "8077e827-9103-4e2a-a790-4e7590a2a75b": {
+      "userId": "default",
+      "createdAt": "2026-02-28T18:24:02.558Z"
+    }
+  },
+  "supportTickets": []
+}
