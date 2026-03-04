@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { resetApplication } from './helpers'
+import { installTenantLocalStorageShim, resetApplication, uninstallTenantLocalStorageShim } from './helpers'
 
 function createStorage() {
   const data = new Map<string, string>()
@@ -62,6 +62,7 @@ function makeIndexedDbMock() {
 
 beforeEach(() => {
   vi.restoreAllMocks()
+  uninstallTenantLocalStorageShim()
   Object.defineProperty(window, 'localStorage', { value: createStorage(), configurable: true })
   Object.defineProperty(window, 'sessionStorage', { value: createStorage(), configurable: true })
 })
@@ -152,5 +153,43 @@ describe('resetApplication', () => {
     expect(getRegistrationsMock).not.toHaveBeenCalled()
     expect(historySpy).not.toHaveBeenCalled()
     expect(replaceMock).toHaveBeenCalledWith('/x')
+  })
+
+  it('flusha writes pendentes do KV antes de efetivar logout', async () => {
+    vi.useFakeTimers()
+    const calls: string[] = []
+    const fetchMock = vi.fn(async (input: any) => {
+      const url = typeof input === 'string' ? input : input?.url
+      calls.push(String(url))
+      if (url === '/api/profile/kv') return { ok: true, json: async () => ({}) } as any
+      if (url === '/api/auth/cleanup') return { ok: true, json: async () => ({}) } as any
+      if (url === '/api/auth/logout') return { ok: true, json: async () => ({}) } as any
+      if (url === '/api/profile/kv/batch') return { ok: true, json: async () => ({ values: {} }) } as any
+      if (String(url).startsWith('/api/profile/kv/list')) return { ok: true, json: async () => ({ keys: [] }) } as any
+      return { ok: true, json: async () => ({}) } as any
+    })
+    vi.stubGlobal('fetch', fetchMock as any)
+
+    const replaceMock = stubLocationReplace()
+
+    installTenantLocalStorageShim('tenantA')
+    window.localStorage.setItem('sisteq-docs-clientes', JSON.stringify([{ id: 'd1' }]))
+
+    await resetApplication({
+      redirectTo: '/login?logout=1',
+      clearIndexedDb: false,
+      clearCacheStorage: false,
+      unregisterServiceWorkers: false,
+      clearHistory: false,
+    })
+
+    expect(calls[0]).toBe('/api/profile/kv')
+    expect(calls).toContain('/api/auth/cleanup')
+    expect(calls).toContain('/api/auth/logout')
+    expect(replaceMock).toHaveBeenCalledWith('/login?logout=1')
+
+    await vi.runAllTimersAsync()
+    expect(calls.filter(c => c === '/api/profile/kv').length).toBe(1)
+    vi.useRealTimers()
   })
 })

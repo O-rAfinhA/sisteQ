@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { STORAGE_KEYS } from '../config/constants'
-import { installTenantLocalStorageShim, uninstallTenantLocalStorageShim } from './helpers'
+import { installTenantLocalStorageShim, uninstallTenantLocalStorageShim, waitForTenantKvHydration } from './helpers'
 
 function createStorage() {
   const data = new Map<string, string>()
@@ -87,5 +87,34 @@ describe('tenant localStorage shim', () => {
     expect(window.localStorage.getItem(STORAGE_KEYS.CONFIG_USUARIOS)).toBe(JSON.stringify([{ id: 1 }]))
     expect(raw.__data.has(STORAGE_KEYS.CONFIG_USUARIOS)).toBe(false)
     expect(raw.__data.has(`tenantA::${STORAGE_KEYS.CONFIG_USUARIOS}`)).toBe(true)
+  })
+
+  it('hidrata dados do KV antes do primeiro uso', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.fn(async (input: any) => {
+      const url = typeof input === 'string' ? input : input?.url
+      if (url === '/api/profile/kv/batch') {
+        return {
+          ok: true,
+          json: async () => ({
+            values: {
+              [STORAGE_KEYS.DOCS_CLIENTES]: [{ id: 'd1', nome: 'Doc' }],
+            },
+          }),
+        } as any
+      }
+      if (String(url).startsWith('/api/profile/kv/list')) {
+        return { ok: true, json: async () => ({ keys: [] }) } as any
+      }
+      return { ok: false, json: async () => ({}) } as any
+    })
+    vi.stubGlobal('fetch', fetchMock as any)
+
+    installTenantLocalStorageShim('tenantA')
+    await vi.runAllTimersAsync()
+    await waitForTenantKvHydration('tenantA')
+
+    expect(window.localStorage.getItem(STORAGE_KEYS.DOCS_CLIENTES)).toBe(JSON.stringify([{ id: 'd1', nome: 'Doc' }]))
+    vi.useRealTimers()
   })
 })

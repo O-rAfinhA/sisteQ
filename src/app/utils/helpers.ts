@@ -282,6 +282,104 @@ const TENANT_ID_SESSION_KEY = 'sisteq:tenantId';
 const TENANT_SHIM_KEY = '__SISTEQ_TENANT_SHIM__';
 const LEGACY_OWNER_TENANT_KEY = '__SISTEQ_LEGACY_OWNER_TENANT__';
 const FETCH_SHIM_KEY = '__SISTEQ_FETCH_SHIM__';
+const KV_SYNC_STATE_KEY = '__SISTEQ_KV_SYNC__';
+
+function getKvSyncState() {
+  const state: any = (globalThis as any)[KV_SYNC_STATE_KEY];
+  if (state && typeof state === 'object') return state;
+  const next: any = {
+    timers: new Map<string, any>(),
+    pendingWrites: new Map<string, string>(),
+    hydrationPromises: new Map<string, Promise<void>>(),
+    hydratedTenants: new Set<string>(),
+  };
+  (globalThis as any)[KV_SYNC_STATE_KEY] = next;
+  return next;
+}
+
+export async function flushTenantKvWrites(): Promise<void> {
+  if (typeof fetch !== 'function') return;
+  const state = getKvSyncState();
+  const entries = Array.from(state.pendingWrites.entries()) as Array<[string, string]>;
+  if (entries.length === 0) return;
+
+  for (const [k] of entries) {
+    const timer = state.timers.get(k);
+    if (timer) {
+      try {
+        clearTimeout(timer);
+      } catch {
+      }
+    }
+    state.timers.delete(k);
+  }
+
+  const parseForServer = (rawValue: string) => {
+    const s = String(rawValue ?? '');
+    try {
+      return JSON.parse(s);
+    } catch {
+      return s;
+    }
+  };
+
+  await Promise.all(
+    entries.map(async ([key, rawValue]) => {
+      try {
+        await fetch('/api/profile/kv', {
+          method: 'PUT',
+          credentials: 'same-origin',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ key, value: parseForServer(rawValue) }),
+        });
+      } catch {
+      } finally {
+        state.pendingWrites.delete(key);
+      }
+    }),
+  );
+}
+
+export async function waitForTenantKvHydration(tenantId: string): Promise<void> {
+  const tid = String(tenantId ?? '').trim();
+  if (!tid) return Promise.resolve();
+  const state = getKvSyncState();
+  if (state.hydratedTenants.has(tid)) return Promise.resolve();
+  const existing = state.hydrationPromises.get(tid);
+  if (existing) return existing;
+
+  await new Promise<void>(resolve => setTimeout(resolve, 0));
+  if (state.hydratedTenants.has(tid)) return;
+  const afterTick = state.hydrationPromises.get(tid);
+  if (afterTick) return afterTick;
+
+  if (typeof window === 'undefined') return Promise.resolve();
+  return new Promise(resolve => {
+    const handler = (evt: Event) => {
+      const detail = (evt as any)?.detail;
+      const hydratedTid = String(detail?.tenantId ?? '').trim();
+      if (hydratedTid !== tid) return;
+      try {
+        window.removeEventListener('sisteq:kv-hydrated', handler as any);
+      } catch {
+      }
+      resolve();
+    };
+    try {
+      window.addEventListener('sisteq:kv-hydrated', handler as any, { once: false } as any);
+    } catch {
+      resolve();
+      return;
+    }
+    setTimeout(() => {
+      try {
+        window.removeEventListener('sisteq:kv-hydrated', handler as any);
+      } catch {
+      }
+      resolve();
+    }, 8000);
+  });
+}
 
 function storageSafeGet(storage: Storage, key: string) {
   try {
@@ -377,15 +475,6 @@ export function installTenantLocalStorageShim(tenantId: string) {
     return false;
   };
 
-  const kvSyncKey = '__SISTEQ_KV_SYNC__';
-  const getKvSyncState = () => {
-    const state: any = (globalThis as any)[kvSyncKey];
-    if (state && typeof state === 'object') return state;
-    const next: any = { timers: new Map<string, any>(), hydrated: new Set<string>() };
-    (globalThis as any)[kvSyncKey] = next;
-    return next;
-  };
-
   const parseForServer = (rawValue: string) => {
     const s = String(rawValue ?? '');
     try {
@@ -411,18 +500,24 @@ export function installTenantLocalStorageShim(tenantId: string) {
     const shimState: any = (globalThis as any)[TENANT_SHIM_KEY];
     const canSync = typeof shimState?.shouldSyncKv === 'function' ? Boolean(shimState.shouldSyncKv(k)) : false;
     if (!canSync) return;
+    syncState.pendingWrites.set(k, rawValue);
     const timer = syncState.timers.get(k);
     if (timer) clearTimeout(timer);
     syncState.timers.set(
       k,
       setTimeout(() => {
         syncState.timers.delete(k);
+        const latestRaw = syncState.pendingWrites.get(k) ?? rawValue;
         fetch('/api/profile/kv', {
           method: 'PUT',
           credentials: 'same-origin',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ key: k, value: parseForServer(rawValue) }),
-        }).catch(() => {});
+          body: JSON.stringify({ key: k, value: parseForServer(latestRaw) }),
+        })
+          .catch(() => {})
+          .finally(() => {
+            syncState.pendingWrites.delete(k);
+          });
       }, 900),
     );
   };
@@ -430,8 +525,9 @@ export function installTenantLocalStorageShim(tenantId: string) {
   const hydrateKvToLocalStorage = (io: { getItem: (key: string) => string | null; setItem: (key: string, value: string) => void }) => {
     if (typeof fetch !== 'function') return;
     const state = getKvSyncState();
-    if (state.hydrated.has(tenantId)) return;
-    state.hydrated.add(tenantId);
+    if (state.hydratedTenants.has(tenantId)) return;
+    if (state.hydrationPromises.has(tenantId)) return;
+
     const keys = Array.from(new Set<string>([...Object.values(STORAGE_KEYS), 'planos-qualificacao']));
     const fetchBatch = (allKeys: string[]) =>
       fetch('/api/profile/kv/batch', {
@@ -459,20 +555,36 @@ export function installTenantLocalStorageShim(tenantId: string) {
         })
         .catch(() => {});
 
-    fetchBatch(keys);
-
-    fetch(`/api/profile/kv/list?prefix=${encodeURIComponent('sisteq-requisitos-')}&limit=500`, {
-      method: 'GET',
-      credentials: 'same-origin',
-    })
-      .then(async res => {
-        const json = await res.json().catch(() => null);
-        if (!res.ok) return;
-        const extraKeys = Array.isArray(json?.keys) ? (json.keys as any[]).map(k => String(k)).filter(Boolean) : [];
-        if (extraKeys.length === 0) return;
-        fetchBatch(extraKeys);
+    const hydrationPromise = (async () => {
+      await fetchBatch(keys);
+      await fetch(`/api/profile/kv/list?prefix=${encodeURIComponent('sisteq-requisitos-')}&limit=500`, {
+        method: 'GET',
+        credentials: 'same-origin',
       })
-      .catch(() => {});
+        .then(async res => {
+          const json = await res.json().catch(() => null);
+          if (!res.ok) return;
+          const extraKeys = Array.isArray(json?.keys) ? (json.keys as any[]).map(k => String(k)).filter(Boolean) : [];
+          if (extraKeys.length === 0) return;
+          await fetchBatch(extraKeys);
+        })
+        .catch(() => {});
+    })()
+      .catch(() => {})
+      .finally(() => {
+        state.hydrationPromises.delete(tenantId);
+        state.hydratedTenants.add(tenantId);
+        try {
+          window.dispatchEvent(new CustomEvent('sisteq:kv-hydrated', { detail: { tenantId } }));
+        } catch {
+          try {
+            window.dispatchEvent(new Event('sisteq:kv-hydrated'));
+          } catch {
+          }
+        }
+      });
+
+    state.hydrationPromises.set(tenantId, hydrationPromise);
   };
 
   const existing: any = (globalThis as any)[TENANT_SHIM_KEY];
@@ -852,6 +964,16 @@ export async function resetApplication(options: ResetApplicationOptions = {}): P
   const clearCache = options.clearCacheStorage ?? true;
   const unregisterSw = options.unregisterServiceWorkers ?? true;
   const clearHistory = options.clearHistory ?? true;
+
+  try {
+    const flush = (globalThis as any).__SISTEQ_FLUSH_WRITES__;
+    if (typeof flush === 'function') await flush();
+  } catch {
+  }
+  try {
+    await flushTenantKvWrites();
+  } catch {
+  }
 
   safeCall(() => window.dispatchEvent(new Event('sisteq:reset')));
   safeCall(() => {

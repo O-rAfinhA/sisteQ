@@ -14,11 +14,25 @@ import {
   installTenantFetchShim,
   installTenantLocalStorageShim,
   setTenantIdToSession,
+  waitForTenantKvHydration,
 } from '../utils/helpers';
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   const params = useParams<{ companyId?: string }>();
   const urlCompanyId = String(params.companyId ?? '').trim() || null;
+
+  const [activeTenantId, setActiveTenantId] = useState<string | null>(() => {
+    const fromUrl = (() => {
+      if (typeof window === 'undefined') return null;
+      const m = /^\/empresa\/([^/]+)(\/.*)?$/.exec(window.location.pathname || '');
+      const raw = m?.[1] ? decodeURIComponent(m[1]) : '';
+      const v = String(raw || '').trim();
+      return v || null;
+    })();
+    return fromUrl ?? getTenantIdFromSession();
+  });
+
+  const [kvReady, setKvReady] = useState(() => !activeTenantId);
 
   const [tenantReady, setTenantReady] = useState(() => {
     const fromUrl = (() => {
@@ -50,6 +64,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         setTenantIdToSession(tenantId);
         installTenantLocalStorageShim(tenantId);
         installTenantFetchShim(tenantId);
+        setActiveTenantId(tenantId);
       } catch {
       } finally {
         if (!cancelled) setTenantReady(true);
@@ -67,11 +82,13 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     if (sessionTenantId === urlCompanyId) {
       installTenantLocalStorageShim(urlCompanyId);
       installTenantFetchShim(urlCompanyId);
+      setActiveTenantId(urlCompanyId);
       return;
     }
     setTenantIdToSession(urlCompanyId);
     installTenantLocalStorageShim(urlCompanyId);
     installTenantFetchShim(urlCompanyId);
+    setActiveTenantId(urlCompanyId);
     try {
       window.dispatchEvent(new CustomEvent('sisteq:reset', { detail: { persist: false } }));
     } catch {
@@ -82,7 +99,28 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     }
   }, [urlCompanyId]);
 
-  if (!tenantReady) {
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      const tid = String(activeTenantId ?? '').trim();
+      if (!tid) {
+        if (!cancelled) setKvReady(true);
+        return;
+      }
+      if (!cancelled) setKvReady(false);
+      try {
+        await waitForTenantKvHydration(tid);
+      } finally {
+        if (!cancelled) setKvReady(true);
+      }
+    };
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTenantId]);
+
+  if (!tenantReady || !kvReady) {
     return (
       <div className="flex h-screen items-center justify-center bg-gray-50 text-gray-700">
         Carregando...
