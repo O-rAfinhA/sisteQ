@@ -466,8 +466,25 @@ function isProd() {
   return process.env.NODE_ENV === 'production'
 }
 
-function baseUrlFromRequestHost(host: string) {
-  const proto = isProd() ? 'https' : 'http'
+function headerFirst(headers: Record<string, any>, key: string) {
+  const raw = headers[key]
+  if (typeof raw === 'string') return raw
+  if (Array.isArray(raw) && typeof raw[0] === 'string') return raw[0]
+  return ''
+}
+
+function firstForwardedValue(v: string) {
+  const s = v.trim()
+  if (!s) return ''
+  return s.split(',')[0]?.trim() || ''
+}
+
+function baseUrlFromRequestHeaders(headers: Record<string, any>) {
+  const forwardedProto = firstForwardedValue(headerFirst(headers, 'x-forwarded-proto')).toLowerCase()
+  const forwardedHost = firstForwardedValue(headerFirst(headers, 'x-forwarded-host'))
+  const host = forwardedHost || String(headers.host || '')
+  if (!host) return ''
+  const proto = forwardedProto === 'http' || forwardedProto === 'https' ? forwardedProto : isProd() ? 'https' : 'http'
   return `${proto}://${host}`
 }
 
@@ -528,17 +545,31 @@ function clearCookie(name: string) {
 }
 
 function assertSameOrigin(req: { headers: Record<string, any> }) {
-  const host = String(req.headers.host || '')
-  if (!host) return
-  const expected = baseUrlFromRequestHost(host)
+  const expected = baseUrlFromRequestHeaders(req.headers)
+  if (!expected) return
   const origin = typeof req.headers.origin === 'string' ? req.headers.origin : ''
   const referer = typeof req.headers.referer === 'string' ? req.headers.referer : ''
+  const expectedOrigin = (() => {
+    try {
+      return new URL(expected).origin
+    } catch {
+      return expected
+    }
+  })()
   if (origin) {
-    if (origin !== expected) throw new AuthError('CSRF bloqueado')
+    try {
+      if (new URL(origin).origin !== expectedOrigin) throw new AuthError('CSRF bloqueado')
+    } catch {
+      if (origin !== expectedOrigin) throw new AuthError('CSRF bloqueado')
+    }
     return
   }
   if (referer) {
-    if (!referer.startsWith(expected)) throw new AuthError('CSRF bloqueado')
+    try {
+      if (new URL(referer).origin !== expectedOrigin) throw new AuthError('CSRF bloqueado')
+    } catch {
+      if (!referer.startsWith(expectedOrigin)) throw new AuthError('CSRF bloqueado')
+    }
   }
 }
 

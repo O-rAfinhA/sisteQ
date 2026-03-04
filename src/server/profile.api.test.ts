@@ -154,6 +154,27 @@ describe('Profile API', () => {
     expect(json.user.email).toBe('novo@email.com.br')
   })
 
+  it('permite PUT quando Origin bate com x-forwarded-proto/host', async () => {
+    const cookie = await createAuthCookie()
+    const req: any = {
+      method: 'PUT',
+      query: { slug: ['me'] },
+      headers: {
+        cookie,
+        host: 'internal.local:3000',
+        origin: 'https://app.example.com',
+        'x-forwarded-proto': 'https',
+        'x-forwarded-host': 'app.example.com',
+      },
+      body: { name: 'Nome', email: 'nome@exemplo.com' },
+    }
+    const res = createMockRes()
+    await handler(req, res as any)
+    const { status, json } = res.getState()
+    expect(status).toBe(200)
+    expect(json.user.email).toBe('nome@exemplo.com')
+  })
+
   it('PUT /profile/password falha com senha atual incorreta', async () => {
     const cookie = await createAuthCookie()
     const req: any = {
@@ -468,5 +489,111 @@ describe('Tenant KV API (PostgreSQL)', () => {
     await withPgClient(async client => {
       await client.query(`DELETE FROM sisteq_tenant_kv WHERE tenant_id = $1`, [tenant.id])
     })
+  })
+})
+
+describe('Tenant KV API (Arquivo)', () => {
+  const prevProfileDbPath = process.env.SISTEQ_PROFILE_DB_PATH
+  const prevKvDbPath = process.env.SISTEQ_TENANT_KV_DB_PATH
+  const prevSecret = process.env.SISTEQ_SESSION_SECRET
+  const prevStore = process.env.SISTEQ_PROFILE_STORE
+  const prevDbUrl = process.env.DATABASE_URL
+  const prevPgHost = process.env.PGHOST
+  const prevPostgresHost = process.env.POSTGRES_HOST
+
+  const tmpDir = path.join(os.tmpdir(), 'sisteq-tenant-kv-file-tests')
+  let profileDbPath = path.join(tmpDir, `profile_${Date.now()}.json`)
+  let kvDbPath = path.join(tmpDir, `kv_${Date.now()}.json`)
+
+  beforeEach(() => {
+    profileDbPath = path.join(tmpDir, `profile_${Date.now()}_${Math.random().toString(16).slice(2)}.json`)
+    kvDbPath = path.join(tmpDir, `kv_${Date.now()}_${Math.random().toString(16).slice(2)}.json`)
+    process.env.SISTEQ_PROFILE_DB_PATH = profileDbPath
+    process.env.SISTEQ_TENANT_KV_DB_PATH = kvDbPath
+    process.env.SISTEQ_SESSION_SECRET = 'test-secret'
+    process.env.SISTEQ_PROFILE_STORE = 'file'
+    process.env.DATABASE_URL = ''
+    process.env.PGHOST = ''
+    process.env.POSTGRES_HOST = ''
+  })
+
+  afterEach(() => {
+    process.env.SISTEQ_PROFILE_DB_PATH = prevProfileDbPath
+    process.env.SISTEQ_TENANT_KV_DB_PATH = prevKvDbPath
+    process.env.SISTEQ_SESSION_SECRET = prevSecret
+    process.env.SISTEQ_PROFILE_STORE = prevStore
+    process.env.DATABASE_URL = prevDbUrl
+    process.env.PGHOST = prevPgHost
+    process.env.POSTGRES_HOST = prevPostgresHost
+  })
+
+  function createMockRes() {
+    const state: { status: number; json: any; headers: Record<string, any> } = {
+      status: 200,
+      json: null,
+      headers: {},
+    }
+    const res: any = {
+      status(code: number) {
+        state.status = code
+        return res
+      },
+      json(payload: any) {
+        state.json = payload
+        return res
+      },
+      setHeader(key: string, value: any) {
+        state.headers[key] = value
+      },
+      getState() {
+        return state
+      },
+    }
+    return res
+  }
+
+  async function callProfileApi(opts: { method: string; slug: string[]; cookie: string; query?: any; body?: any }) {
+    const req: any = {
+      method: opts.method,
+      query: { slug: opts.slug, ...(opts.query ?? {}) },
+      headers: { cookie: opts.cookie },
+      body: opts.body,
+    }
+    const res = createMockRes()
+    await handler(req, res as any)
+    return res.getState()
+  }
+
+  async function createTenantCookie() {
+    const tenantSlug = `tenant-${Date.now()}-${Math.random().toString(16).slice(2)}`
+    const { tenant, user } = await registerTenantAndUser({
+      tenantSlug,
+      companyName: 'Empresa',
+      name: 'Admin',
+      email: `admin-${Date.now()}-${Math.random()}@example.com`,
+      password: 'Senha@12345',
+    })
+    const cookie = cookieHeaderFromSetCookie(await createAuthCookiesForUser(user))
+    return { tenant, user, cookie }
+  }
+
+  it('salva e lê um valor por tenant (fallback)', async () => {
+    const { tenant, cookie } = await createTenantCookie()
+    const key = 'sisteq-docs-clientes'
+    const value = [{ id: 'd1', nome: 'arquivo.pdf' }]
+
+    const put = await callProfileApi({ method: 'PUT', slug: ['kv'], cookie, body: { key, value } })
+    expect(put.status).toBe(200)
+    expect(put.json.ok).toBe(true)
+
+    const get = await callProfileApi({ method: 'GET', slug: ['kv'], cookie, query: { key } })
+    expect(get.status).toBe(200)
+    expect(get.json.value).toEqual(value)
+
+    const list = await callProfileApi({ method: 'GET', slug: ['kv', 'list'], cookie, query: { prefix: 'sisteq-docs-', limit: '10' } })
+    expect(list.status).toBe(200)
+    expect(list.json.keys).toContain(key)
+
+    void tenant
   })
 })
