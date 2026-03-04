@@ -1,0 +1,28 @@
+{
+  "tenants": {
+    "t_5beb9defa902fd8c": {
+      "id": "t_5beb9defa902fd8c",
+      "slug": "t1-1772595333804-ad731c1c14a71",
+      "name": "T1",
+      "createdAt": "2026-03-04T03:35:33.806Z",
+      "updatedAt": "2026-03-04T03:35:33.806Z"
+    },
+    "t_3892cbe2d6a9a72c": {
+      "id": "t_3892cbe2d6a9a72c",
+      "slug": "t2-1772595335705-b7e0a0ed714f",
+      "name": "T2",
+      "createdAt": "2026-03-04T03:35:35.708Z",
+      "updatedAt": "2026-03-04T03:35:35.708Z"
+    }
+  },
+  "users": {},
+  "audits": {},
+  "refreshTokens": {},
+  "emailVerificationTokens": {},
+  "passwordResetTokens": {},
+  "tenantBySlug": {
+    "t1-1772595333804-ad731c1c14a71": "t_5beb9defa902fd8c",
+    "t2-1772595335705-b7e0a0ed714f": "t_3892cbe2d6a9a72c"
+  },
+  "userByTenantEmail": {}
+}

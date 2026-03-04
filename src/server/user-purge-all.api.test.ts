@@ -54,6 +54,7 @@ async function readDb(dbPath: string) {
 describe('User purge all API', () => {
   const prevDbPath = process.env.SISTEQ_PROFILE_DB_PATH
   const prevSecret = process.env.SISTEQ_SESSION_SECRET
+  const prevStore = process.env.SISTEQ_PROFILE_STORE
   const prevSuper = process.env.SISTEQ_SUPER_ADMIN_TOKEN
   const tmpDir = path.join(os.tmpdir(), 'sisteq-user-purge-tests')
   let dbPath = path.join(tmpDir, `profile_${Date.now()}.json`)
@@ -62,12 +63,14 @@ describe('User purge all API', () => {
     dbPath = path.join(tmpDir, `profile_${Date.now()}_${Math.random().toString(16).slice(2)}.json`)
     process.env.SISTEQ_PROFILE_DB_PATH = dbPath
     process.env.SISTEQ_SESSION_SECRET = 'test-secret'
+    process.env.SISTEQ_PROFILE_STORE = 'file'
     process.env.SISTEQ_SUPER_ADMIN_TOKEN = 'super-admin-token-1234567890'
   })
 
   afterEach(() => {
     process.env.SISTEQ_PROFILE_DB_PATH = prevDbPath
     process.env.SISTEQ_SESSION_SECRET = prevSecret
+    process.env.SISTEQ_PROFILE_STORE = prevStore
     process.env.SISTEQ_SUPER_ADMIN_TOKEN = prevSuper
   })
 
@@ -159,4 +162,3 @@ describe('User purge all API', () => {
     expect(Object.keys(db.passwordResetTokens).length).toBe(0)
   })
 })
-

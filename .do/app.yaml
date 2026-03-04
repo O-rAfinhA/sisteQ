@@ -35,9 +35,6 @@ services:
       - key: NEXT_TELEMETRY_DISABLED
         value: "1"
         scope: RUN_TIME
-      - key: SISTEQ_PROFILE_STORE
-        value: pg
-        scope: RUN_TIME
       - key: PGSSLMODE
         value: require
         scope: RUN_TIME

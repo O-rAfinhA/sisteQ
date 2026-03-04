@@ -40,6 +40,7 @@ function createMockRes() {
 describe('SSR auth guard (catch-all)', () => {
   const prevDbPath = process.env.SISTEQ_PROFILE_DB_PATH
   const prevSecret = process.env.SISTEQ_SESSION_SECRET
+  const prevStore = process.env.SISTEQ_PROFILE_STORE
   const tmpDir = path.join(os.tmpdir(), 'sisteq-ssr-auth-guard-tests')
   let dbPath = path.join(tmpDir, `profile_${Date.now()}.json`)
 
@@ -47,11 +48,13 @@ describe('SSR auth guard (catch-all)', () => {
     dbPath = path.join(tmpDir, `profile_${Date.now()}_${Math.random().toString(16).slice(2)}.json`)
     process.env.SISTEQ_PROFILE_DB_PATH = dbPath
     process.env.SISTEQ_SESSION_SECRET = 'test-secret'
+    process.env.SISTEQ_PROFILE_STORE = 'file'
   })
 
   afterEach(() => {
     process.env.SISTEQ_PROFILE_DB_PATH = prevDbPath
     process.env.SISTEQ_SESSION_SECRET = prevSecret
+    process.env.SISTEQ_PROFILE_STORE = prevStore
   })
 
   it('redireciona para /login quando não autenticado', async () => {

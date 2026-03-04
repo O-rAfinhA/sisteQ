@@ -137,7 +137,25 @@ function getPool() {
 
 export async function withPgClient<T>(fn: (client: PoolClient) => Promise<T>) {
   const p = getPool()
-  const client = await p.connect()
+  let client: PoolClient
+  try {
+    client = await p.connect()
+  } catch (e: any) {
+    const code = typeof e?.code === 'string' ? e.code : ''
+    const retryable =
+      code === 'ENOTFOUND' ||
+      code === 'EAI_AGAIN' ||
+      code === 'ECONNREFUSED' ||
+      code === 'ETIMEDOUT' ||
+      code === 'ENETUNREACH' ||
+      code === 'ECONNRESET'
+    if (retryable) {
+      const err: any = new Error(process.env.NODE_ENV === 'production' ? 'Banco de dados indisponível' : e?.message || String(e))
+      err.status = 503
+      throw err
+    }
+    throw e
+  }
   try {
     return await fn(client)
   } finally {
