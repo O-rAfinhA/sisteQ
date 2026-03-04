@@ -1,11 +1,12 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
-import {
-  AuthError,
-  ConflictError,
-  createEmailVerificationToken,
-  registerTenantAndUser,
-} from '@/server/profile'
+import { AuthError, requestEmailVerification, requireTenantFromRequest } from '@/server/profile'
 import { sendVerificationEmail } from '@/server/email'
+
+function getClientIp(req: NextApiRequest) {
+  const xf = req.headers['x-forwarded-for']
+  const ip = Array.isArray(xf) ? xf[0] : typeof xf === 'string' ? xf.split(',')[0]?.trim() : ''
+  return ip || (req.socket as any)?.remoteAddress || 'unknown'
+}
 
 function getProto(req: NextApiRequest) {
   const xfProto = req.headers['x-forwarded-proto']
@@ -28,37 +29,44 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
-    const { tenant, user } = await registerTenantAndUser((req.body ?? {}) as any)
-    const token = await createEmailVerificationToken(tenant.id, user.id)
+    const tenant = await requireTenantFromRequest(req)
+    const body = (req.body ?? {}) as any
+    const email = typeof body.email === 'string' ? body.email : ''
+    const rateKey = `${getClientIp(req)}:${tenant.id}:${email.trim().toLowerCase()}:resend`
+    const result = await requestEmailVerification({ tenantId: tenant.id, email: body.email, rateKey })
+
     if (process.env.NODE_ENV !== 'production') {
-      res.status(201).json({ ok: true, dev: { verificationToken: token } })
+      res.status(200).json({ ok: true, dev: { verificationToken: result.token } })
       return
     }
+
+    if (!result.token) {
+      res.status(200).json({ ok: true, emailSent: false })
+      return
+    }
+
     const proto = getProto(req)
     const host = getHost(req)
-    const verificationUrl = `${proto}://${host}/api/auth/verify-email?token=${encodeURIComponent(token)}&tenant=${encodeURIComponent(
+    const verificationUrl = `${proto}://${host}/api/auth/verify-email?token=${encodeURIComponent(result.token)}&tenant=${encodeURIComponent(
       tenant.slug,
     )}`
 
     let emailSent = false
     try {
-      await sendVerificationEmail({ to: user.email, verificationUrl })
+      await sendVerificationEmail({ to: email.trim().toLowerCase(), verificationUrl })
       emailSent = true
     } catch {
       emailSent = false
     }
 
-    res.status(201).json({ ok: true, emailSent })
+    res.status(200).json({ ok: true, emailSent })
   } catch (e: any) {
     if (e instanceof AuthError) {
-      res.status(401).json({ error: e.message })
-      return
-    }
-    if (e instanceof ConflictError) {
-      res.status(409).json({ error: e.message })
+      res.status(400).json({ error: e.message })
       return
     }
     const status = typeof e?.status === 'number' ? e.status : 500
     res.status(status).json({ error: e?.message || 'Erro interno' })
   }
 }
+

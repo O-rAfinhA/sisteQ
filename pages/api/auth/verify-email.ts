@@ -1,6 +1,13 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { AuthError, verifyEmailByToken } from '@/server/profile'
 
+function safeNext(value: unknown) {
+  if (typeof value !== 'string') return ''
+  const v = value.trim()
+  if (!v) return ''
+  return v.startsWith('/') ? v : ''
+}
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const method = req.method || 'GET'
   if (method !== 'GET' && method !== 'POST') {
@@ -27,7 +34,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     await verifyEmailByToken(token)
 
     if (method === 'GET') {
-      res.redirect(302, '/login?verified=1')
+      const tenant = typeof req.query.tenant === 'string' ? req.query.tenant.trim() : ''
+      const next = safeNext(req.query.next)
+      const sp = new URLSearchParams()
+      sp.set('verified', '1')
+      if (tenant) sp.set('tenant', tenant)
+      if (next) sp.set('next', next)
+      res.redirect(302, `/login?${sp.toString()}`)
       return
     }
     res.status(200).json({ ok: true })

@@ -33,6 +33,10 @@ export default function Login() {
     return raw.trim();
   }, [searchParams]);
 
+  const verified = useMemo(() => {
+    return (searchParams.get('verified') || '').trim() === '1';
+  }, [searchParams]);
+
   const next = useMemo(() => {
     const raw = searchParams.get('next') || '/';
     if (!raw.startsWith('/')) return '/';
@@ -47,6 +51,8 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showResend, setShowResend] = useState(false);
+  const [resendLoading, setResendLoading] = useState(false);
 
   const hydrateTenantScope = async () => {
     try {
@@ -71,6 +77,7 @@ export default function Login() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setShowResend(false);
     try {
       await apiJson<{ user: any }>('/api/auth/login', {
         method: 'POST',
@@ -80,9 +87,32 @@ export default function Login() {
       await hydrateTenantScope();
       navigate(next, { replace: true });
     } catch (err: any) {
-      toast.error(err?.message || 'Falha ao entrar');
+      const msg = String(err?.message || 'Falha ao entrar');
+      if (/e-?mail não verificado/i.test(msg)) setShowResend(true);
+      toast.error(msg);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleResendVerification = async () => {
+    const emailTrim = email.trim();
+    if (!emailTrim) {
+      toast.error('Informe o e-mail para reenviar a verificação');
+      return;
+    }
+    setResendLoading(true);
+    try {
+      await apiJson<{ ok: true }>('/api/auth/resend-verification', {
+        method: 'POST',
+        body: JSON.stringify({ email: emailTrim }),
+        headers: authHeaders,
+      });
+      toast.success('Se o e-mail existir, enviaremos o link de verificação.');
+    } catch (err: any) {
+      toast.error(err?.message || 'Falha ao reenviar verificação');
+    } finally {
+      setResendLoading(false);
     }
   };
 
@@ -111,8 +141,9 @@ export default function Login() {
       return;
     }
     setLoading(true);
+    setShowResend(false);
     try {
-      const result = await apiJson<{ ok: true; dev?: { verificationToken?: string } }>('/api/auth/register', {
+      const result = await apiJson<{ ok: true; emailSent?: boolean; dev?: { verificationToken?: string } }>('/api/auth/register', {
         method: 'POST',
         body: JSON.stringify({
           tenantSlug,
@@ -140,6 +171,7 @@ export default function Login() {
       }
 
       toast.success('Conta criada. Verifique seu e-mail para ativar o acesso.');
+      if (result?.emailSent === false) toast.error('Não foi possível enviar o e-mail agora. Use "Reenviar verificação".');
       setMode('login');
       setPassword('');
       setConfirmPassword('');
@@ -166,6 +198,11 @@ export default function Login() {
           <CardDescription>{description}</CardDescription>
         </CardHeader>
         <CardContent>
+          {verified && (
+            <div className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800 mb-4">
+              E-mail confirmado com sucesso. Você já pode entrar.
+            </div>
+          )}
           <form
             onSubmit={mode === 'login' ? handleLogin : mode === 'forgot' ? handleForgot : handleRegister}
             className="space-y-4"
@@ -259,6 +296,19 @@ export default function Login() {
               {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {mode === 'login' ? 'Entrar' : mode === 'forgot' ? 'Enviar instruções' : 'Criar conta'}
             </Button>
+
+            {mode === 'login' && showResend && (
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full"
+                disabled={loading || resendLoading}
+                onClick={handleResendVerification}
+              >
+                {resendLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Reenviar verificação de e-mail
+              </Button>
+            )}
 
             {mode === 'login' && (
               <Button

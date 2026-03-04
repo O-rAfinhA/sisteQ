@@ -1062,6 +1062,24 @@ export async function requestPasswordReset(tenantId: string, emailRaw: unknown) 
   return { ok: true, token }
 }
 
+export async function requestEmailVerification(opts: {
+  tenantId: string
+  email: unknown
+  rateKey: string
+}) {
+  assertValidEmail(opts.email, 'E-mail')
+  const email = normalizeEmail(String(opts.email))
+  checkAuthRateLimit(opts.rateKey)
+
+  const user = await findUserByEmail(opts.tenantId, email)
+  if (!user || user.disabledAt) return { ok: true as const, token: null as string | null, alreadyVerified: false as const }
+  if (user.emailVerifiedAt) return { ok: true as const, token: null as string | null, alreadyVerified: true as const }
+
+  const token = await createOneTimeToken('emailVerificationTokens', opts.tenantId, user.id, 60 * 60 * 24)
+  audit('auth.email.verification.requested', { tenantId: opts.tenantId, userId: user.id })
+  return { ok: true as const, token, alreadyVerified: false as const }
+}
+
 export async function resetPasswordWithToken(tokenRaw: unknown, newPasswordRaw: unknown) {
   assertNonEmptyString(tokenRaw, 'Token')
   assertNonEmptyString(newPasswordRaw, 'Nova senha')
