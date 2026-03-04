@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { installTenantLocalStorageShim, resetApplication, uninstallTenantLocalStorageShim } from './helpers'
+import { STORAGE_KEYS } from '../config/constants'
+import { installTenantLocalStorageShim, resetApplication, uninstallTenantLocalStorageShim, waitForTenantKvHydration } from './helpers'
 
 function createStorage() {
   const data = new Map<string, string>()
   return {
+    __data: data,
     get length() {
       return data.size
     },
@@ -190,6 +192,81 @@ describe('resetApplication', () => {
 
     await vi.runAllTimersAsync()
     expect(calls.filter(c => c === '/api/profile/kv').length).toBe(1)
+    vi.useRealTimers()
+  })
+
+  it('mantém documentos após logout/login via KV', async () => {
+    vi.useFakeTimers()
+    const serverKv = new Map<string, any>()
+    let lastBatchKeys: string[] = []
+    let lastBatchValues: Record<string, any> = {}
+
+    const fetchMock = vi.fn(async (input: any, init?: any) => {
+      const url = typeof input === 'string' ? input : input?.url
+
+      if (url === '/api/profile/kv') {
+        const body = JSON.parse(String(init?.body ?? '{}'))
+        serverKv.set(String(body?.key ?? ''), body?.value)
+        return { ok: true, json: async () => ({ ok: true }) } as any
+      }
+
+      if (url === '/api/profile/kv/batch') {
+        const body = JSON.parse(String(init?.body ?? '{}'))
+        const keys = Array.isArray(body?.keys) ? body.keys.map((k: any) => String(k)) : []
+        const values: Record<string, any> = {}
+        for (const k of keys) {
+          if (serverKv.has(k)) values[k] = serverKv.get(k)
+        }
+        lastBatchKeys = keys
+        lastBatchValues = values
+        return { ok: true, json: async () => ({ values }) } as any
+      }
+
+      if (String(url).startsWith('/api/profile/kv/list')) {
+        return { ok: true, json: async () => ({ keys: [] }) } as any
+      }
+
+      if (url === '/api/auth/cleanup') return { ok: true, json: async () => ({}) } as any
+      if (url === '/api/auth/logout') return { ok: true, json: async () => ({}) } as any
+
+      return { ok: true, json: async () => ({}) } as any
+    })
+    vi.stubGlobal('fetch', fetchMock as any)
+
+    stubLocationReplace()
+
+    const docs = [{ id: 'd1', nomeDocumento: 'Doc', arquivoBase64: 'data:application/pdf;base64,AAAA' }]
+
+    installTenantLocalStorageShim('tenantA')
+    window.localStorage.setItem(STORAGE_KEYS.DOCS_CLIENTES, JSON.stringify(docs))
+
+    await resetApplication({
+      redirectTo: '/login?logout=1',
+      clearIndexedDb: false,
+      clearCacheStorage: false,
+      unregisterServiceWorkers: false,
+      clearHistory: false,
+    })
+
+    expect(serverKv.get(STORAGE_KEYS.DOCS_CLIENTES)).toEqual(docs)
+
+    uninstallTenantLocalStorageShim()
+    Object.defineProperty(window, 'localStorage', { value: createStorage(), configurable: true })
+    Object.defineProperty(window, 'sessionStorage', { value: createStorage(), configurable: true })
+
+    installTenantLocalStorageShim('tenantA')
+    await vi.runAllTimersAsync()
+    await waitForTenantKvHydration('tenantA')
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/profile/kv/batch',
+      expect.objectContaining({ method: 'POST' }),
+    )
+    expect(lastBatchKeys).toContain(STORAGE_KEYS.DOCS_CLIENTES)
+    expect(Object.prototype.hasOwnProperty.call(lastBatchValues, STORAGE_KEYS.DOCS_CLIENTES)).toBe(true)
+    const raw = window.localStorage as any
+    expect(raw.__data.has(`tenantA::${STORAGE_KEYS.DOCS_CLIENTES}`)).toBe(true)
+    expect(window.localStorage.getItem(STORAGE_KEYS.DOCS_CLIENTES)).toBe(JSON.stringify(docs))
     vi.useRealTimers()
   })
 })

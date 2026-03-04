@@ -297,6 +297,47 @@ function getKvSyncState() {
   return next;
 }
 
+function clearKvSyncState() {
+  const state: any = (globalThis as any)[KV_SYNC_STATE_KEY];
+  if (!state || typeof state !== 'object') return;
+  try {
+    if (state.timers && typeof state.timers.forEach === 'function') {
+      state.timers.forEach((t: any) => {
+        try {
+          clearTimeout(t);
+        } catch {
+        }
+      });
+    }
+  } catch {
+  }
+  try {
+    state.timers?.clear?.();
+  } catch {
+  }
+  try {
+    state.pendingWrites?.clear?.();
+  } catch {
+  }
+  try {
+    state.hydrationPromises?.clear?.();
+  } catch {
+  }
+  try {
+    state.hydratedTenants?.clear?.();
+  } catch {
+  }
+  try {
+    (globalThis as any)[KV_SYNC_STATE_KEY] = {
+      timers: new Map<string, any>(),
+      pendingWrites: new Map<string, string>(),
+      hydrationPromises: new Map<string, Promise<void>>(),
+      hydratedTenants: new Set<string>(),
+    };
+  } catch {
+  }
+}
+
 export async function flushTenantKvWrites(): Promise<void> {
   if (typeof fetch !== 'function') return;
   const state = getKvSyncState();
@@ -326,15 +367,14 @@ export async function flushTenantKvWrites(): Promise<void> {
   await Promise.all(
     entries.map(async ([key, rawValue]) => {
       try {
-        await fetch('/api/profile/kv', {
+        const res = await fetch('/api/profile/kv', {
           method: 'PUT',
           credentials: 'same-origin',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ key, value: parseForServer(rawValue) }),
         });
+        if (res?.ok) state.pendingWrites.delete(key);
       } catch {
-      } finally {
-        state.pendingWrites.delete(key);
       }
     }),
   );
@@ -514,16 +554,35 @@ export function installTenantLocalStorageShim(tenantId: string) {
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ key: k, value: parseForServer(latestRaw) }),
         })
-          .catch(() => {})
-          .finally(() => {
-            syncState.pendingWrites.delete(k);
+          .then(res => {
+            if (res?.ok) {
+              syncState.pendingWrites.delete(k);
+              return;
+            }
+            syncState.pendingWrites.set(k, latestRaw);
+            if (!syncState.timers.has(k)) {
+              syncState.timers.set(k, setTimeout(() => scheduleKvWrite(k, latestRaw), 3000));
+            }
+          })
+          .catch(() => {
+            syncState.pendingWrites.set(k, latestRaw);
+            if (!syncState.timers.has(k)) {
+              syncState.timers.set(k, setTimeout(() => scheduleKvWrite(k, latestRaw), 3000));
+            }
           });
       }, 900),
     );
   };
 
-  const hydrateKvToLocalStorage = (io: { getItem: (key: string) => string | null; setItem: (key: string, value: string) => void }) => {
+  const hydrateKvToLocalStorage = (
+    io: { getItem: (key: string) => string | null; setItem: (key: string, value: string) => void },
+    storageRef: any,
+  ) => {
     if (typeof fetch !== 'function') return;
+    try {
+      if (typeof window !== 'undefined' && (window as any).localStorage !== storageRef) return;
+    } catch {
+    }
     const state = getKvSyncState();
     if (state.hydratedTenants.has(tenantId)) return;
     if (state.hydrationPromises.has(tenantId)) return;
@@ -589,16 +648,27 @@ export function installTenantLocalStorageShim(tenantId: string) {
 
   const existing: any = (globalThis as any)[TENANT_SHIM_KEY];
   if (existing && existing.installed) {
+    if (existing.storageRef && existing.storageRef !== ls) {
+      try {
+        delete (globalThis as any)[TENANT_SHIM_KEY];
+      } catch {
+        try {
+          (globalThis as any)[TENANT_SHIM_KEY] = undefined;
+        } catch {
+        }
+      }
+    } else {
     existing.tenantId = tenantId;
     existing.shouldScope = shouldScope;
     existing.shouldSyncKv = shouldSyncKv;
     try {
       const getItem = typeof existing.originalGetItem === 'function' ? existing.originalGetItem : ls.getItem.bind(ls);
       const setItem = typeof existing.originalSetItem === 'function' ? existing.originalSetItem : ls.setItem.bind(ls);
-      setTimeout(() => hydrateKvToLocalStorage({ getItem, setItem }), 0);
+      setTimeout(() => hydrateKvToLocalStorage({ getItem, setItem }, ls), 0);
     } catch {
     }
     return;
+    }
   }
 
   const originalGetItem = ls.getItem.bind(ls);
@@ -612,6 +682,7 @@ export function installTenantLocalStorageShim(tenantId: string) {
     tenantId,
     shouldScope,
     shouldSyncKv,
+    storageRef: ls,
     originalGetItem,
     originalSetItem,
     originalRemoveItem,
@@ -689,7 +760,7 @@ export function installTenantLocalStorageShim(tenantId: string) {
   }
 
   try {
-    setTimeout(() => hydrateKvToLocalStorage({ getItem: originalGetItem, setItem: originalSetItem }), 0);
+    setTimeout(() => hydrateKvToLocalStorage({ getItem: originalGetItem, setItem: originalSetItem }, ls), 0);
   } catch {
   }
 }
@@ -700,6 +771,17 @@ export function uninstallTenantLocalStorageShim() {
   if (!ls) return;
   const state: any = (globalThis as any)[TENANT_SHIM_KEY];
   if (!state || !state.installed) return;
+  if (state.storageRef && state.storageRef !== ls) {
+    try {
+      delete (globalThis as any)[TENANT_SHIM_KEY];
+    } catch {
+      try {
+        (globalThis as any)[TENANT_SHIM_KEY] = undefined;
+      } catch {
+      }
+    }
+    return;
+  }
   try {
     if (typeof state.originalGetItem === 'function') ls.getItem = state.originalGetItem;
     if (typeof state.originalSetItem === 'function') ls.setItem = state.originalSetItem;
@@ -1001,6 +1083,7 @@ export async function resetApplication(options: ResetApplicationOptions = {}): P
 
   safeCall(() => uninstallTenantFetchShim());
   safeCall(() => uninstallTenantLocalStorageShim());
+  if (logout || clearStorage) safeCall(() => clearKvSyncState());
 
   if (clearIndexedDb) await clearAllIndexedDbDatabases();
   if (clearCache) await clearCacheStorage();

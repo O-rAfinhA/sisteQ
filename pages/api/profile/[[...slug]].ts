@@ -32,6 +32,14 @@ import {
   setTenantKvValues,
 } from '@/server/tenant-kv'
 
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '25mb',
+    },
+  },
+}
+
 function accessLog(event: string, fields: Record<string, unknown>) {
   if (process.env.SISTEQ_ACCESS_LOGS !== '1') return
   console.info(JSON.stringify({ ts: new Date().toISOString(), level: 'info', event, ...fields }))

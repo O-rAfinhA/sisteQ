@@ -331,7 +331,7 @@ const CATEGORIAS: CategoriaConfig[] = [
   {
     key: 'externos',
     nome: 'Documentos Externos',
-    storageKey: 'sisteq-tipos-docs-externos',
+    storageKey: 'sisteq-tipos-externos',
     icone: FileCheck,
     descricao: 'Normas, regulamentos e documentos de origem externa',
     exemplos: [

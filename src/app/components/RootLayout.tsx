@@ -64,6 +64,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         setTenantIdToSession(tenantId);
         installTenantLocalStorageShim(tenantId);
         installTenantFetchShim(tenantId);
+        setKvReady(false);
         setActiveTenantId(tenantId);
       } catch {
       } finally {
@@ -78,16 +79,25 @@ export default function RootLayout({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!urlCompanyId) return;
+    if (activeTenantId === urlCompanyId) {
+      const sessionTenantId = getTenantIdFromSession();
+      if (sessionTenantId !== urlCompanyId) setTenantIdToSession(urlCompanyId);
+      installTenantLocalStorageShim(urlCompanyId);
+      installTenantFetchShim(urlCompanyId);
+      return;
+    }
     const sessionTenantId = getTenantIdFromSession();
     if (sessionTenantId === urlCompanyId) {
       installTenantLocalStorageShim(urlCompanyId);
       installTenantFetchShim(urlCompanyId);
+      setKvReady(false);
       setActiveTenantId(urlCompanyId);
       return;
     }
     setTenantIdToSession(urlCompanyId);
     installTenantLocalStorageShim(urlCompanyId);
     installTenantFetchShim(urlCompanyId);
+    setKvReady(false);
     setActiveTenantId(urlCompanyId);
     try {
       window.dispatchEvent(new CustomEvent('sisteq:reset', { detail: { persist: false } }));
@@ -97,7 +107,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       } catch {
       }
     }
-  }, [urlCompanyId]);
+  }, [urlCompanyId, activeTenantId]);
 
   useEffect(() => {
     let cancelled = false;

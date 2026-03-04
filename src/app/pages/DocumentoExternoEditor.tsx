@@ -95,7 +95,7 @@ export default function DocumentoExternoEditor() {
   };
 
   const carregarTipos = () => {
-    setTiposDocumentos(getFromStorage<any[]>('sisteq-tipos-docs-externos', []));
+    setTiposDocumentos(getFromStorage<any[]>('sisteq-tipos-externos', []));
   };
 
   const carregarDocumento = () => {
