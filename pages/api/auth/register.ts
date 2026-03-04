@@ -4,8 +4,15 @@ import {
   ConflictError,
   createEmailVerificationToken,
   registerTenantAndUser,
+  verifyEmailByToken,
 } from '@/server/profile'
 import { sendVerificationEmail } from '@/server/email'
+
+function emailVerificationMode() {
+  const raw = (process.env.SISTEQ_EMAIL_VERIFICATION_MODE || '').trim().toLowerCase()
+  if (raw === 'disabled' || raw === 'token' || raw === 'required') return raw as 'disabled' | 'token' | 'required'
+  return 'required' as const
+}
 
 function getProto(req: NextApiRequest) {
   const xfProto = req.headers['x-forwarded-proto']
@@ -39,6 +46,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const verificationUrl = `${proto}://${host}/api/auth/verify-email?token=${encodeURIComponent(token)}&tenant=${encodeURIComponent(
       tenant.slug,
     )}`
+
+    const mode = emailVerificationMode()
+    if (mode === 'disabled') {
+      await verifyEmailByToken(token)
+      res.status(201).json({ ok: true, emailVerified: true })
+      return
+    }
+
+    if (mode === 'token') {
+      res.status(201).json({ ok: true, emailSent: false, verificationUrl })
+      return
+    }
 
     let emailSent = false
     try {

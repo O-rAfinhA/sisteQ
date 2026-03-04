@@ -2,6 +2,12 @@ import type { NextApiRequest, NextApiResponse } from 'next'
 import { AuthError, requestEmailVerification, requireTenantFromRequest } from '@/server/profile'
 import { sendVerificationEmail } from '@/server/email'
 
+function emailVerificationMode() {
+  const raw = (process.env.SISTEQ_EMAIL_VERIFICATION_MODE || '').trim().toLowerCase()
+  if (raw === 'disabled' || raw === 'token' || raw === 'required') return raw as 'disabled' | 'token' | 'required'
+  return 'required' as const
+}
+
 function getClientIp(req: NextApiRequest) {
   const xf = req.headers['x-forwarded-for']
   const ip = Array.isArray(xf) ? xf[0] : typeof xf === 'string' ? xf.split(',')[0]?.trim() : ''
@@ -51,6 +57,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       tenant.slug,
     )}`
 
+    const mode = emailVerificationMode()
+    if (mode === 'disabled') {
+      res.status(200).json({ ok: true, emailSent: false })
+      return
+    }
+
+    if (mode === 'token') {
+      res.status(200).json({ ok: true, emailSent: false, verificationUrl })
+      return
+    }
+
     let emailSent = false
     try {
       await sendVerificationEmail({ to: email.trim().toLowerCase(), verificationUrl })
@@ -69,4 +86,3 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     res.status(status).json({ error: e?.message || 'Erro interno' })
   }
 }
-

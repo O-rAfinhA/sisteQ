@@ -103,11 +103,15 @@ export default function Login() {
     }
     setResendLoading(true);
     try {
-      await apiJson<{ ok: true }>('/api/auth/resend-verification', {
+      const result = await apiJson<{ ok: true; verificationUrl?: string }>('/api/auth/resend-verification', {
         method: 'POST',
         body: JSON.stringify({ email: emailTrim }),
         headers: authHeaders,
       });
+      if (result?.verificationUrl) {
+        window.location.href = result.verificationUrl;
+        return;
+      }
       toast.success('Se o e-mail existir, enviaremos o link de verificação.');
     } catch (err: any) {
       toast.error(err?.message || 'Falha ao reenviar verificação');
@@ -143,7 +147,13 @@ export default function Login() {
     setLoading(true);
     setShowResend(false);
     try {
-      const result = await apiJson<{ ok: true; emailSent?: boolean; dev?: { verificationToken?: string } }>('/api/auth/register', {
+      const result = await apiJson<{
+        ok: true;
+        emailSent?: boolean;
+        emailVerified?: boolean;
+        verificationUrl?: string;
+        dev?: { verificationToken?: string };
+      }>('/api/auth/register', {
         method: 'POST',
         body: JSON.stringify({
           tenantSlug,
@@ -167,6 +177,22 @@ export default function Login() {
         });
         await hydrateTenantScope();
         navigate(next, { replace: true });
+        return;
+      }
+
+      if (result?.emailVerified) {
+        await apiJson<{ user: any }>('/api/auth/login', {
+          method: 'POST',
+          body: JSON.stringify({ email, password }),
+          headers: authHeaders,
+        });
+        await hydrateTenantScope();
+        navigate(next, { replace: true });
+        return;
+      }
+
+      if (result?.verificationUrl) {
+        window.location.href = result.verificationUrl;
         return;
       }
 
