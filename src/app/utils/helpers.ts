@@ -360,10 +360,19 @@ export function installTenantLocalStorageShim(tenantId: string) {
 
   const scopedKeys = new Set<string>(Object.values(STORAGE_KEYS));
   const shouldScope = (key: string) => {
-    if (scopedKeys.has(key)) return true;
-    if (key === 'planos-qualificacao') return true;
-    if (key.startsWith('sisteq')) return true;
-    if (key.startsWith('fornecedores')) return true;
+    const k = String(key ?? '');
+    if (!k) return false;
+    if (k.includes('::')) return false;
+    if (k.startsWith('__SISTEQ_')) return false;
+    return true;
+  };
+
+  const shouldSyncKv = (key: string) => {
+    const k = String(key ?? '');
+    if (!k) return false;
+    if (scopedKeys.has(k)) return true;
+    if (k === 'planos-qualificacao') return true;
+    if (k.startsWith('sisteq-requisitos-')) return true;
     return false;
   };
 
@@ -397,14 +406,16 @@ export function installTenantLocalStorageShim(tenantId: string) {
 
   const scheduleKvWrite = (k: string, rawValue: string) => {
     if (typeof fetch !== 'function') return;
-    const state = getKvSyncState();
-    if (!shouldScope(k)) return;
-    const timer = state.timers.get(k);
+    const syncState = getKvSyncState();
+    const shimState: any = (globalThis as any)[TENANT_SHIM_KEY];
+    const canSync = typeof shimState?.shouldSyncKv === 'function' ? Boolean(shimState.shouldSyncKv(k)) : false;
+    if (!canSync) return;
+    const timer = syncState.timers.get(k);
     if (timer) clearTimeout(timer);
-    state.timers.set(
+    syncState.timers.set(
       k,
       setTimeout(() => {
-        state.timers.delete(k);
+        syncState.timers.delete(k);
         fetch('/api/profile/kv', {
           method: 'PUT',
           credentials: 'same-origin',
@@ -467,6 +478,7 @@ export function installTenantLocalStorageShim(tenantId: string) {
   if (existing && existing.installed) {
     existing.tenantId = tenantId;
     existing.shouldScope = shouldScope;
+    existing.shouldSyncKv = shouldSyncKv;
     try {
       const getItem = typeof existing.originalGetItem === 'function' ? existing.originalGetItem : ls.getItem.bind(ls);
       const setItem = typeof existing.originalSetItem === 'function' ? existing.originalSetItem : ls.setItem.bind(ls);
@@ -486,6 +498,7 @@ export function installTenantLocalStorageShim(tenantId: string) {
     installed: true,
     tenantId,
     shouldScope,
+    shouldSyncKv,
     originalGetItem,
     originalSetItem,
     originalRemoveItem,
