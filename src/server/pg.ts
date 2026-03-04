@@ -83,6 +83,22 @@ function shouldUseSsl() {
   return false
 }
 
+function sanitizeConnectionStringForPgSsl(raw: string) {
+  try {
+    const u = new URL(raw)
+    if (u.protocol !== 'postgres:' && u.protocol !== 'postgresql:') return raw
+    const keysToRemove: string[] = []
+    for (const [k] of u.searchParams) {
+      const lk = k.toLowerCase()
+      if (lk === 'ssl' || lk === 'sslmode' || lk === 'sslrootcert' || lk === 'sslcert' || lk === 'sslkey') keysToRemove.push(k)
+    }
+    for (const k of keysToRemove) u.searchParams.delete(k)
+    return u.toString()
+  } catch {
+    return raw
+  }
+}
+
 function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
@@ -115,7 +131,9 @@ function getPool() {
     throw err
   }
   if (pool) return pool
-  const connectionString = getConnectionString()
+  const useSsl = shouldUseSsl()
+  let connectionString = getConnectionString()
+  if (useSsl && connectionString) connectionString = sanitizeConnectionStringForPgSsl(connectionString)
   pool = new Pool({
     connectionString: connectionString || undefined,
     host: getDbHost() || undefined,
@@ -123,7 +141,7 @@ function getPool() {
     user: getDbUser() || undefined,
     password: getDbPassword() || undefined,
     database: getDbName() || undefined,
-    ssl: shouldUseSsl() ? { rejectUnauthorized: false } : undefined,
+    ssl: useSsl ? { rejectUnauthorized: false } : undefined,
     max: process.env.PGPOOL_MAX ? Number(process.env.PGPOOL_MAX) : 10,
     idleTimeoutMillis: process.env.PGPOOL_IDLE_MS ? Number(process.env.PGPOOL_IDLE_MS) : 30_000,
     connectionTimeoutMillis: process.env.PGPOOL_CONN_TIMEOUT_MS ? Number(process.env.PGPOOL_CONN_TIMEOUT_MS) : 5_000,
@@ -148,7 +166,10 @@ export async function withPgClient<T>(fn: (client: PoolClient) => Promise<T>) {
       code === 'ECONNREFUSED' ||
       code === 'ETIMEDOUT' ||
       code === 'ENETUNREACH' ||
-      code === 'ECONNRESET'
+      code === 'ECONNRESET' ||
+      code === 'SELF_SIGNED_CERT_IN_CHAIN' ||
+      code === 'DEPTH_ZERO_SELF_SIGNED_CERT' ||
+      code === 'UNABLE_TO_VERIFY_LEAF_SIGNATURE'
     if (retryable) {
       const err: any = new Error(process.env.NODE_ENV === 'production' ? 'Banco de dados indisponível' : e?.message || String(e))
       err.status = 503

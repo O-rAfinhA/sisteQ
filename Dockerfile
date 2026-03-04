@@ -18,6 +18,8 @@ ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV HOSTNAME=0.0.0.0
 
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+
 RUN useradd -r -u 1001 nodejs && mkdir -p /app && chown -R nodejs:nodejs /app
 
 COPY --from=builder --chown=nodejs:nodejs /app/.next/standalone ./
