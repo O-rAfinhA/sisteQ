@@ -79,13 +79,15 @@ describe('SSR auth guard (catch-all)', () => {
     const cookie = cookieHeaderFromSetCookie(await createAuthCookiesForUser(user))
 
     const ctx: any = {
-      resolvedUrl: '/gestao-estrategica',
+      resolvedUrl: `/empresa/${encodeURIComponent(user.tenantId)}/gestao-estrategica`,
       query: {},
       req: { headers: { cookie } },
     }
     const result: any = await getServerSideProps(ctx)
     expect(result.props).toBeTruthy()
     expect(result.props.routeKey).toBe('DirecionamentoEstrategico')
+    expect(result.props.pathname).toBe('/gestao-estrategica')
+    expect(result.props.params.companyId).toBe(user.tenantId)
   })
 
   it('redireciona para next quando acessa /login autenticado', async () => {
@@ -105,6 +107,6 @@ describe('SSR auth guard (catch-all)', () => {
     }
     const result: any = await getServerSideProps(ctx)
     expect(result.redirect).toBeTruthy()
-    expect(result.redirect.destination).toBe('/perfil')
+    expect(result.redirect.destination).toBe(`/empresa/${encodeURIComponent(user.tenantId)}/perfil`)
   })
 })

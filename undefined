@@ -1,32 +1,32 @@
 {
   "tenants": {
-    "t_a538b0952381479d": {
-      "id": "t_a538b0952381479d",
-      "slug": "t1-1772598379548-d0e63ae9a9f658",
+    "t_2616483ef14a6695": {
+      "id": "t_2616483ef14a6695",
+      "slug": "t1-1772636490502-533ffe79757428",
       "name": "T1",
-      "createdAt": "2026-03-04T04:26:19.551Z",
-      "updatedAt": "2026-03-04T04:26:19.551Z"
+      "createdAt": "2026-03-04T15:01:30.509Z",
+      "updatedAt": "2026-03-04T15:01:30.509Z"
     },
-    "t_9fa029305545026d": {
-      "id": "t_9fa029305545026d",
-      "slug": "t2-1772598384715-49ce2e2d35ab6",
+    "t_d1675cd03f32757e": {
+      "id": "t_d1675cd03f32757e",
+      "slug": "t2-1772636492853-8b871788c8e098",
       "name": "T2",
-      "createdAt": "2026-03-04T04:26:24.716Z",
-      "updatedAt": "2026-03-04T04:26:24.716Z"
+      "createdAt": "2026-03-04T15:01:32.911Z",
+      "updatedAt": "2026-03-04T15:01:32.911Z"
     }
   },
   "users": {
-    "t_a538b0952381479d:u_b25c3e789d2ab356": {
-      "id": "u_b25c3e789d2ab356",
-      "tenantId": "t_a538b0952381479d",
+    "t_2616483ef14a6695:u_d137202a62abed64": {
+      "id": "u_d137202a62abed64",
+      "tenantId": "t_2616483ef14a6695",
       "name": "Admin 1",
-      "email": "a1-1772598379548-0.873121133459435@example.com",
+      "email": "a1-1772636490502-0.4411647772172044@example.com",
       "role": "Admin",
-      "avatarUrl": "https://api.dicebear.com/7.x/avataaars/svg?seed=u_b25c3e789d2ab356",
+      "avatarUrl": "https://api.dicebear.com/7.x/avataaars/svg?seed=u_d137202a62abed64",
       "disabledAt": null,
-      "createdAt": "2026-03-04T04:26:19.555Z",
-      "updatedAt": "2026-03-04T04:26:19.555Z",
-      "passwordHash": "bcrypt:$2b$12$yAQkuK4MmyxshbNvaIVWguHyWr5hcxiIp9ESyQuSoEbfsXd3bQFJS",
+      "createdAt": "2026-03-04T15:01:30.517Z",
+      "updatedAt": "2026-03-04T15:01:30.517Z",
+      "passwordHash": "bcrypt:$2b$12$VLOo/EO9VsPWIx/8YoG8l.08xdoQvdelc0D929Qazu2Gq7AmF.yzS",
       "emailVerifiedAt": null,
       "preferences": {
         "theme": "system",
@@ -47,18 +47,80 @@
       "activity": [],
       "supportTickets": []
     },
-    "t_a538b0952381479d:u_b79fdac1635cc816": {
-      "id": "u_b79fdac1635cc816",
-      "tenantId": "t_a538b0952381479d",
+    "t_2616483ef14a6695:u_cfab416ede613851": {
+      "id": "u_cfab416ede613851",
+      "tenantId": "t_2616483ef14a6695",
       "name": "User 1",
-      "email": "u1-1772598383480@example.com",
+      "email": "u1-1772636491755@example.com",
       "role": "User",
-      "avatarUrl": "https://api.dicebear.com/7.x/avataaars/svg?seed=u_b79fdac1635cc816",
+      "avatarUrl": "https://api.dicebear.com/7.x/avataaars/svg?seed=u_cfab416ede613851",
       "disabledAt": null,
-      "createdAt": "2026-03-04T04:26:24.246Z",
-      "updatedAt": "2026-03-04T04:26:24.246Z",
-      "passwordHash": "bcrypt:$2b$12$PDlIUWQj2lPKk9LL9trm3eSpYt06K5VsaA5FFHYTuj3ptaXbfK02i",
-      "emailVerifiedAt": "2026-03-04T04:26:24.703Z",
+      "createdAt": "2026-03-04T15:01:31.762Z",
+      "updatedAt": "2026-03-04T15:01:31.762Z",
+      "passwordHash": "bcrypt:$2b$12$6nG7gAD8rqdM4f/NLTxScuguZxoYEAdhIZ6vjRPw4OmgaCQf6W1vy",
+      "emailVerifiedAt": "2026-03-04T15:01:32.820Z",
+      "preferences": {
+        "theme": "system",
+        "language": "pt-BR",
+        "compactMode": false,
+        "analyticsOptIn": false
+      },
+      "notificationSettings": {
+        "email": true,
+        "inApp": true,
+        "marketing": false
+      },
+      "privacy": {
+        "showEmail": false,
+        "showActivity": true
+      },
+      "notifications": [],
+      "activity": [],
+      "supportTickets": []
+    },
+    "t_d1675cd03f32757e:u_7e5c3647e0f03a54": {
+      "id": "u_7e5c3647e0f03a54",
+      "tenantId": "t_d1675cd03f32757e",
+      "name": "Admin 2",
+      "email": "a2-1772636492853-0.6135800809598356@example.com",
+      "role": "Admin",
+      "avatarUrl": "https://api.dicebear.com/7.x/avataaars/svg?seed=u_7e5c3647e0f03a54",
+      "disabledAt": null,
+      "createdAt": "2026-03-04T15:01:32.951Z",
+      "updatedAt": "2026-03-04T15:01:32.951Z",
+      "passwordHash": "bcrypt:$2b$12$Ftz0o6RIPcsrqlOGt3WtveySPx1bd4k.haB3BCDCU3s6bLsp8hpzu",
+      "emailVerifiedAt": null,
+      "preferences": {
+        "theme": "system",
+        "language": "pt-BR",
+        "compactMode": false,
+        "analyticsOptIn": false
+      },
+      "notificationSettings": {
+        "email": true,
+        "inApp": true,
+        "marketing": false
+      },
+      "privacy": {
+        "showEmail": false,
+        "showActivity": true
+      },
+      "notifications": [],
+      "activity": [],
+      "supportTickets": []
+    },
+    "t_d1675cd03f32757e:u_b5b21d6b0270096a": {
+      "id": "u_b5b21d6b0270096a",
+      "tenantId": "t_d1675cd03f32757e",
+      "name": "User 2",
+      "email": "u2-1772636494105@example.com",
+      "role": "User",
+      "avatarUrl": "https://api.dicebear.com/7.x/avataaars/svg?seed=u_b5b21d6b0270096a",
+      "disabledAt": null,
+      "createdAt": "2026-03-04T15:01:34.109Z",
+      "updatedAt": "2026-03-04T15:01:34.109Z",
+      "passwordHash": "bcrypt:$2b$12$UooZJSOW2u7jL07uESLOIO4t/Ud3rNKtWfuqdFcCc7WIBqy56QlYe",
+      "emailVerifiedAt": "2026-03-04T15:01:35.667Z",
       "preferences": {
         "theme": "system",
         "language": "pt-BR",
@@ -81,13 +143,13 @@
   },
   "audits": {},
   "refreshTokens": {
-    "rt_ab6ecd7e11e85a83": {
-      "id": "rt_ab6ecd7e11e85a83",
-      "tokenHash": "a04ff0db160a84d61e5f64f30edfa525db2dd186c1040d45b989adb45a603330",
-      "userId": "u_b25c3e789d2ab356",
-      "tenantId": "t_a538b0952381479d",
-      "createdAt": "2026-03-04T04:26:20.294Z",
-      "expiresAt": "2026-04-03T04:26:20.294Z",
+    "rt_8e5a6608f59287ee": {
+      "id": "rt_8e5a6608f59287ee",
+      "tokenHash": "e622c8ed31648df78d745d6f1134e906a939e2d32416639b0af2bb98227843b5",
+      "userId": "u_d137202a62abed64",
+      "tenantId": "t_2616483ef14a6695",
+      "createdAt": "2026-03-04T15:01:31.749Z",
+      "expiresAt": "2026-04-03T15:01:31.749Z",
       "revokedAt": null,
       "rotatedAt": null,
       "lastUsedAt": null
@@ -96,11 +158,13 @@
   "emailVerificationTokens": {},
   "passwordResetTokens": {},
   "tenantBySlug": {
-    "t1-1772598379548-d0e63ae9a9f658": "t_a538b0952381479d",
-    "t2-1772598384715-49ce2e2d35ab6": "t_9fa029305545026d"
+    "t1-1772636490502-533ffe79757428": "t_2616483ef14a6695",
+    "t2-1772636492853-8b871788c8e098": "t_d1675cd03f32757e"
   },
   "userByTenantEmail": {
-    "t_a538b0952381479d:a1-1772598379548-0.873121133459435@example.com": "t_a538b0952381479d:u_b25c3e789d2ab356",
-    "t_a538b0952381479d:u1-1772598383480@example.com": "t_a538b0952381479d:u_b79fdac1635cc816"
+    "t_2616483ef14a6695:a1-1772636490502-0.4411647772172044@example.com": "t_2616483ef14a6695:u_d137202a62abed64",
+    "t_2616483ef14a6695:u1-1772636491755@example.com": "t_2616483ef14a6695:u_cfab416ede613851",
+    "t_d1675cd03f32757e:a2-1772636492853-0.6135800809598356@example.com": "t_d1675cd03f32757e:u_7e5c3647e0f03a54",
+    "t_d1675cd03f32757e:u2-1772636494105@example.com": "t_d1675cd03f32757e:u_b5b21d6b0270096a"
   }
 }

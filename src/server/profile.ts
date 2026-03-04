@@ -587,14 +587,30 @@ export async function requireAuthFromRequest(req: { headers: Record<string, any>
   const cookies = parseCookies(req.headers.cookie)
   const rawAccess = cookies[ACCESS_COOKIE_NAME]
   if (!rawAccess) throw new AuthError('Não autenticado')
-  try {
-    const ctx = await verifyAccessToken(rawAccess)
-    const user = await getUserById(ctx.tenantId, ctx.userId)
-    if (user.disabledAt) throw new AuthError('Usuário desativado')
-    return { userId: ctx.userId, tenantId: ctx.tenantId, role: user.role }
-  } catch {
-    throw new AuthError('Sessão expirada')
+
+  const ctx = await (async () => {
+    try {
+      return await verifyAccessToken(rawAccess)
+    } catch {
+      throw new AuthError('Sessão expirada')
+    }
+  })()
+
+  const requestedCompanyIdRaw = req.headers['x-company-id']
+  const requestedCompanyId =
+    typeof requestedCompanyIdRaw === 'string'
+      ? requestedCompanyIdRaw.trim()
+      : Array.isArray(requestedCompanyIdRaw) && typeof requestedCompanyIdRaw[0] === 'string'
+        ? requestedCompanyIdRaw[0].trim()
+        : ''
+
+  if (requestedCompanyId && requestedCompanyId !== ctx.tenantId) {
+    throw new ForbiddenError('Empresa inválida')
   }
+
+  const user = await getUserById(ctx.tenantId, ctx.userId)
+  if (user.disabledAt) throw new AuthError('Usuário desativado')
+  return { userId: ctx.userId, tenantId: ctx.tenantId, role: user.role }
 }
 
 function normalizeEmail(value: string) {

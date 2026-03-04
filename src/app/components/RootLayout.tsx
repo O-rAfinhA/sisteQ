@@ -1,4 +1,4 @@
-import { useLocation } from 'react-router';
+import { useLocation, useParams } from 'react-router';
 import { useEffect, useState, useMemo, type ReactNode } from 'react';
 import { FileDown } from 'lucide-react';
 import { StrategicProvider } from '../context/StrategicContext';
@@ -9,12 +9,31 @@ import { TopMenu } from './TopMenu';
 import { ModularSidebar } from './ModularSidebar';
 import { modules, Module, getModuleByPath } from '../config/modules';
 import { useFornecedores } from '../hooks/useFornecedores';
-import { getTenantIdFromSession, installTenantLocalStorageShim, setTenantIdToSession } from '../utils/helpers';
+import {
+  getTenantIdFromSession,
+  installTenantFetchShim,
+  installTenantLocalStorageShim,
+  setTenantIdToSession,
+} from '../utils/helpers';
 
 export default function RootLayout({ children }: { children: ReactNode }) {
+  const params = useParams<{ companyId?: string }>();
+  const urlCompanyId = String(params.companyId ?? '').trim() || null;
+
   const [tenantReady, setTenantReady] = useState(() => {
-    const existingTenantId = getTenantIdFromSession();
-    if (existingTenantId) installTenantLocalStorageShim(existingTenantId);
+    const fromUrl = (() => {
+      if (typeof window === 'undefined') return null;
+      const m = /^\/empresa\/([^/]+)(\/.*)?$/.exec(window.location.pathname || '');
+      const raw = m?.[1] ? decodeURIComponent(m[1]) : '';
+      const v = String(raw || '').trim();
+      return v || null;
+    })();
+    const existingTenantId = fromUrl ?? getTenantIdFromSession();
+    if (existingTenantId) {
+      setTenantIdToSession(existingTenantId);
+      installTenantLocalStorageShim(existingTenantId);
+      installTenantFetchShim(existingTenantId);
+    }
     return Boolean(existingTenantId);
   });
 
@@ -30,6 +49,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         if (!tenantId) throw new Error('Missing tenantId');
         setTenantIdToSession(tenantId);
         installTenantLocalStorageShim(tenantId);
+        installTenantFetchShim(tenantId);
       } catch {
       } finally {
         if (!cancelled) setTenantReady(true);
@@ -40,6 +60,27 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       cancelled = true;
     };
   }, [tenantReady]);
+
+  useEffect(() => {
+    if (!urlCompanyId) return;
+    const sessionTenantId = getTenantIdFromSession();
+    if (sessionTenantId === urlCompanyId) {
+      installTenantLocalStorageShim(urlCompanyId);
+      installTenantFetchShim(urlCompanyId);
+      return;
+    }
+    setTenantIdToSession(urlCompanyId);
+    installTenantLocalStorageShim(urlCompanyId);
+    installTenantFetchShim(urlCompanyId);
+    try {
+      window.dispatchEvent(new CustomEvent('sisteq:reset', { detail: { persist: false } }));
+    } catch {
+      try {
+        window.dispatchEvent(new Event('sisteq:reset'));
+      } catch {
+      }
+    }
+  }, [urlCompanyId]);
 
   if (!tenantReady) {
     return (

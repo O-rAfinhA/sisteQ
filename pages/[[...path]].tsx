@@ -9,6 +9,20 @@ type MatchResult = {
   params: Record<string, string>
 }
 
+function parseCompanyPath(pathname: string): { companyId: string | null; innerPathname: string } {
+  const m = /^\/empresa\/([^/]+)(\/.*)?$/.exec(pathname)
+  if (!m) return { companyId: null, innerPathname: pathname }
+  const companyId = decodeURIComponent(m[1] || '').trim()
+  const innerPathname = m[2] ? String(m[2]) : '/'
+  return { companyId: companyId || null, innerPathname }
+}
+
+function buildCompanyPath(companyId: string | null, innerPathname: string) {
+  if (!companyId) return innerPathname
+  const base = `/empresa/${encodeURIComponent(companyId)}`
+  return innerPathname === '/' ? base : `${base}${innerPathname}`
+}
+
 const ROUTES: Array<{ pattern: string; routeKey: string }> = [
   { pattern: '/', routeKey: 'DirecionamentoEstrategico' },
   { pattern: '/login', routeKey: 'Login' },
@@ -177,32 +191,62 @@ export const getServerSideProps: GetServerSideProps<{
   const { path: _path, ...queryWithoutPath } = context.query
   const searchParams: SearchParams = queryWithoutPath
 
-  if (pathname === '/plano-acao-corretiva') {
+  const { companyId, innerPathname: rawInnerPathname } = parseCompanyPath(pathname)
+  const innerPathname = normalizePathname(rawInnerPathname || '/')
+
+  if (innerPathname === '/login' && companyId) {
     return {
       redirect: {
-        destination: `/acoes-corretivas/plano-acao${toQueryString(searchParams)}`,
+        destination: `/login${toQueryString(searchParams)}`,
         permanent: false,
       },
     }
   }
 
-  if (pathname === '/plano-acao') {
+  if (innerPathname === '/plano-acao-corretiva') {
     return {
       redirect: {
-        destination: `/gestao-estrategica/plano-acao${toQueryString(searchParams)}`,
+        destination: `${buildCompanyPath(companyId, '/acoes-corretivas/plano-acao')}${toQueryString(searchParams)}`,
         permanent: false,
       },
     }
   }
 
-  const match = resolveRoute(pathname)
+  if (innerPathname === '/plano-acao') {
+    return {
+      redirect: {
+        destination: `${buildCompanyPath(companyId, '/gestao-estrategica/plano-acao')}${toQueryString(searchParams)}`,
+        permanent: false,
+      },
+    }
+  }
+
+  const match = resolveRoute(innerPathname)
 
   const fullPath = `${pathname}${toQueryString(searchParams)}`
   const reqForAuth = { headers: context.req.headers as any, method: 'GET' } as any
 
   if (match.routeKey !== 'Login') {
     try {
-      await requireAuthFromRequest(reqForAuth)
+      const auth = await requireAuthFromRequest(reqForAuth)
+
+      if (!companyId) {
+        return {
+          redirect: {
+            destination: `${buildCompanyPath(auth.tenantId, innerPathname)}${toQueryString(searchParams)}`,
+            permanent: false,
+          },
+        }
+      }
+
+      if (companyId !== auth.tenantId) {
+        return {
+          redirect: {
+            destination: `${buildCompanyPath(auth.tenantId, innerPathname)}${toQueryString(searchParams)}`,
+            permanent: false,
+          },
+        }
+      }
     } catch (e: any) {
       if (e instanceof AuthError) {
         return {
@@ -216,12 +260,14 @@ export const getServerSideProps: GetServerSideProps<{
     }
   } else {
     try {
-      await requireAuthFromRequest(reqForAuth)
+      const auth = await requireAuthFromRequest(reqForAuth)
       const rawNext = typeof searchParams.next === 'string' ? searchParams.next : '/'
       const safeNext = rawNext.startsWith('/') ? rawNext : '/'
+      const parsedNext = parseCompanyPath(normalizePathname(safeNext))
+      const nextInner = normalizePathname(parsedNext.innerPathname || '/')
       return {
         redirect: {
-          destination: safeNext,
+          destination: buildCompanyPath(auth.tenantId, nextInner),
           permanent: false,
         },
       }
@@ -232,9 +278,9 @@ export const getServerSideProps: GetServerSideProps<{
 
   return {
     props: {
-      pathname,
+      pathname: innerPathname,
       routeKey: match.routeKey,
-      params: match.params,
+      params: companyId ? { ...match.params, companyId } : match.params,
       searchParams,
     },
   }

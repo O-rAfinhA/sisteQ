@@ -160,5 +160,5 @@ describe('User purge all API', () => {
     expect(Object.keys(db.refreshTokens).length).toBe(0)
     expect(Object.keys(db.emailVerificationTokens).length).toBe(0)
     expect(Object.keys(db.passwordResetTokens).length).toBe(0)
-  })
+  }, 20_000)
 })

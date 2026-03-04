@@ -6,7 +6,7 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
-import { installTenantLocalStorageShim, setTenantIdToSession } from '../utils/helpers';
+import { installTenantFetchShim, installTenantLocalStorageShim, setTenantIdToSession } from '../utils/helpers';
 
 type Mode = 'login' | 'forgot' | 'register';
 
@@ -63,8 +63,11 @@ export default function Login() {
       if (!tenantId) return;
       setTenantIdToSession(tenantId);
       installTenantLocalStorageShim(tenantId);
+      installTenantFetchShim(tenantId);
+      return tenantId;
     } catch {
     }
+    return null;
   };
 
   const authHeaders = useMemo(() => {
@@ -84,8 +87,14 @@ export default function Login() {
         body: JSON.stringify({ email, password }),
         headers: authHeaders,
       });
-      await hydrateTenantScope();
-      navigate(next, { replace: true });
+      const tenantId = await hydrateTenantScope();
+      if (tenantId) {
+        const inner = next.startsWith('/empresa/') ? '/' : next;
+        const destination = inner === '/' ? `/empresa/${encodeURIComponent(tenantId)}` : `/empresa/${encodeURIComponent(tenantId)}${inner}`;
+        navigate(destination, { replace: true });
+      } else {
+        navigate(next, { replace: true });
+      }
     } catch (err: any) {
       const msg = String(err?.message || 'Falha ao entrar');
       if (/e-?mail não verificado/i.test(msg)) setShowResend(true);

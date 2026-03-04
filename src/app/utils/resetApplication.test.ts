@@ -99,7 +99,8 @@ describe('resetApplication', () => {
     await resetApplication({ redirectTo: '/login?reset=1' })
 
     expect(onReset).toHaveBeenCalledTimes(1)
-    expect(fetchMock).toHaveBeenCalledWith('/api/auth/logout', { method: 'POST', credentials: 'same-origin' })
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/auth/cleanup', { method: 'POST', credentials: 'same-origin' })
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/auth/logout', { method: 'POST', credentials: 'same-origin' })
     expect(window.localStorage.length).toBe(0)
     expect(window.sessionStorage.length).toBe(0)
     expect(indexedDbMock.databases).toHaveBeenCalled()

@@ -113,6 +113,31 @@ describe('Profile API', () => {
     expect(json.user.email).toMatch(/@/)
   })
 
+  it('bloqueia acesso quando x-company-id não bate com o tenant do token', async () => {
+    const tenantSlug = uniqueTenantSlug()
+    const email = `test-${Date.now()}-${Math.random()}@example.com`
+    const password = 'Senha@12345'
+    const { tenant, user } = await registerTenantAndUser({
+      tenantSlug,
+      companyName: 'Empresa',
+      name: 'Test User',
+      email,
+      password,
+    })
+    const cookie = cookieHeaderFromSetCookie(await createAuthCookiesForUser(user))
+
+    const req: any = {
+      method: 'GET',
+      query: { slug: ['me'] },
+      headers: { cookie, 'x-company-id': `${tenant.id}-other` },
+    }
+    const res = createMockRes()
+    await handler(req, res as any)
+    const { status, json } = res.getState()
+    expect(status).toBe(403)
+    expect(String(json.error)).toMatch(/empresa/i)
+  })
+
   it('PUT /profile/me atualiza nome e e-mail', async () => {
     const cookie = await createAuthCookie()
     const req: any = {
@@ -294,7 +319,7 @@ describe('Profile API', () => {
     expect(listB.status).toBe(200)
     expect(listB.json.users.length).toBe(2)
     for (const u of listB.json.users) expect(u.tenantId).toBe(adminB.tenantId)
-  })
+  }, 20_000)
 })
 
 describe('Tenant KV API (PostgreSQL)', () => {

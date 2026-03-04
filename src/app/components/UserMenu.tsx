@@ -12,7 +12,7 @@ import {
 } from './ui/dropdown-menu';
 import { Badge } from './ui/badge';
 import { toast } from 'sonner';
-import { clearTenantSession, uninstallTenantLocalStorageShim } from '../utils/helpers';
+import { resetApplication } from '../utils/helpers';
 
 type UserState = {
   name: string;
@@ -44,17 +44,8 @@ export function UserMenu() {
     } catch {
     }
     try {
-      const r = await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
-      const data = await r.json().catch(() => null);
-      if (!r.ok) throw new Error(data?.error || 'Falha ao sair');
       toast.success('Logout realizado');
-      try {
-        window.dispatchEvent(new CustomEvent('sisteq:reset', { detail: { persist: false } }));
-      } catch {
-      }
-      clearTenantSession();
-      uninstallTenantLocalStorageShim();
-      window.location.href = '/';
+      await resetApplication({ redirectTo: '/login?logout=1' });
     } catch (e: any) {
       toast.error(e?.message || 'Falha ao sair');
     } finally {

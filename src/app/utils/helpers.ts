@@ -281,6 +281,7 @@ export function removeFromStorage(key: string): void {
 const TENANT_ID_SESSION_KEY = 'sisteq:tenantId';
 const TENANT_SHIM_KEY = '__SISTEQ_TENANT_SHIM__';
 const LEGACY_OWNER_TENANT_KEY = '__SISTEQ_LEGACY_OWNER_TENANT__';
+const FETCH_SHIM_KEY = '__SISTEQ_FETCH_SHIM__';
 
 function storageSafeGet(storage: Storage, key: string) {
   try {
@@ -603,6 +604,87 @@ export function uninstallTenantLocalStorageShim() {
   }
 }
 
+export function installTenantFetchShim(tenantId: string) {
+  if (typeof window === 'undefined') return;
+  const wf: any = (window as any).fetch;
+  if (typeof wf !== 'function') return;
+
+  const existing: any = (globalThis as any)[FETCH_SHIM_KEY];
+  if (existing && existing.installed) {
+    existing.tenantId = tenantId;
+    return;
+  }
+
+  const originalFetch = wf.bind(window);
+  const shimState: any = { installed: true, tenantId, originalFetch };
+  (globalThis as any)[FETCH_SHIM_KEY] = shimState;
+
+  const shouldDecorate = (urlValue: string) => {
+    const url = String(urlValue || '');
+    if (!url) return false;
+    try {
+      const parsed = new URL(url, window.location.origin);
+      if (parsed.origin !== window.location.origin) return false;
+      return parsed.pathname === '/api' || parsed.pathname.startsWith('/api/');
+    } catch {
+      return url === '/api' || url.startsWith('/api/');
+    }
+  };
+
+  window.fetch = (input: any, init?: RequestInit) => {
+    const state: any = (globalThis as any)[FETCH_SHIM_KEY];
+    const tid = typeof state?.tenantId === 'string' ? state.tenantId : tenantId;
+    const baseFetch: any = typeof state?.originalFetch === 'function' ? state.originalFetch : originalFetch;
+
+    const url = typeof input === 'string' ? input : input instanceof Request ? input.url : String(input || '');
+    if (!tid || !shouldDecorate(url)) return baseFetch(input, init);
+
+    const headerKey = 'x-company-id';
+    const extra: Record<string, string> = { [headerKey]: tid };
+
+    try {
+      if (input instanceof Request) {
+        const headers = new Headers(input.headers);
+        if (!headers.has(headerKey)) headers.set(headerKey, tid);
+        if (init?.headers) {
+          const extraHeaders = new Headers(init.headers as any);
+          extraHeaders.forEach((v, k) => {
+            if (!headers.has(k)) headers.set(k, v);
+          });
+        }
+        const nextReq = new Request(input, { headers });
+        const { headers: _h, ...rest } = init ?? {};
+        return baseFetch(nextReq, rest as any);
+      }
+
+      const headers = new Headers((init?.headers as any) ?? undefined);
+      if (!headers.has(headerKey)) headers.set(headerKey, tid);
+      return baseFetch(input, { ...(init ?? {}), headers });
+    } catch {
+      const nextHeaders = { ...(init?.headers as any), ...extra };
+      return baseFetch(input, { ...(init ?? {}), headers: nextHeaders });
+    }
+  };
+}
+
+export function uninstallTenantFetchShim() {
+  if (typeof window === 'undefined') return;
+  const state: any = (globalThis as any)[FETCH_SHIM_KEY];
+  if (!state || !state.installed) return;
+  try {
+    if (typeof state.originalFetch === 'function') (window as any).fetch = state.originalFetch;
+  } catch {
+  }
+  try {
+    delete (globalThis as any)[FETCH_SHIM_KEY];
+  } catch {
+    try {
+      (globalThis as any)[FETCH_SHIM_KEY] = undefined;
+    } catch {
+    }
+  }
+}
+
 // ============ ID GENERATION ============
 
 /**
@@ -784,6 +866,7 @@ export async function resetApplication(options: ResetApplicationOptions = {}): P
 
   if (logout) {
     try {
+      await fetch('/api/auth/cleanup', { method: 'POST', credentials: 'same-origin' });
       await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
     } catch {
     }
@@ -793,6 +876,9 @@ export async function resetApplication(options: ResetApplicationOptions = {}): P
     safeCall(() => clearWebStorage(window.sessionStorage));
     safeCall(() => clearWebStorage(window.localStorage));
   }
+
+  safeCall(() => uninstallTenantFetchShim());
+  safeCall(() => uninstallTenantLocalStorageShim());
 
   if (clearIndexedDb) await clearAllIndexedDbDatabases();
   if (clearCache) await clearCacheStorage();
