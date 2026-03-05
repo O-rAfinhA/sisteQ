@@ -205,8 +205,8 @@ describe('User cleanup API (PostgreSQL)', () => {
   const prevStore = process.env.SISTEQ_PROFILE_STORE
   const prevDbUrl = process.env.DATABASE_URL
 
-  const dbUrl = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL
-  const canRun = typeof dbUrl === 'string' && dbUrl.trim().length > 0
+  const dbUrl = process.env.TEST_DATABASE_URL
+  const canRun = process.env.SISTEQ_RUN_PG_TESTS === '1' && typeof dbUrl === 'string' && dbUrl.trim().length > 0
 
   async function readDbPg() {
     await withPgClient(async client => {

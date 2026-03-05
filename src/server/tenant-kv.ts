@@ -1,7 +1,7 @@
-import type { PoolClient } from 'pg'
 import fs from 'fs/promises'
 import path from 'path'
-import { isPostgresConfigured, withPgClient, withPgTransaction } from '@/server/pg'
+import { Prisma } from '@prisma/client'
+import { isDatabaseConfigured, prisma } from '@/server/prisma'
 
 function log(event: string, fields: Record<string, unknown> = {}) {
   if (process.env.SISTEQ_DB_LOGS !== '1') return
@@ -14,6 +14,11 @@ function log(event: string, fields: Record<string, unknown> = {}) {
       ...fields,
     }),
   )
+}
+
+function fileFallbackAllowed() {
+  if (process.env.SISTEQ_ALLOW_FILE_FALLBACK === '1') return true
+  return process.env.NODE_ENV !== 'production'
 }
 
 type FileKvRow = { value: any; createdAt: string; updatedAt: string; updatedBy: string }
@@ -117,63 +122,38 @@ function assertKeys(keys: unknown): asserts keys is string[] {
   for (const k of keys) assertKey(k)
 }
 
-let schemaReady = false
-let schemaPromise: Promise<void> | null = null
-
-async function ensureSchemaWithClient(client: PoolClient) {
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS sisteq_tenant_kv (
-      tenant_id TEXT NOT NULL,
-      key TEXT NOT NULL,
-      value JSONB NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-      updated_by TEXT NOT NULL,
-      PRIMARY KEY (tenant_id, key)
-    )
-  `)
-  await client.query(`CREATE INDEX IF NOT EXISTS sisteq_tenant_kv_tenant_idx ON sisteq_tenant_kv (tenant_id)`)
-}
-
-async function ensureSchema() {
-  if (schemaReady) return
-  if (schemaPromise) return await schemaPromise
-  schemaPromise = (async () => {
-    await withPgClient(async client => {
-      await ensureSchemaWithClient(client)
-    })
-    schemaReady = true
-    schemaPromise = null
-  })()
-  return await schemaPromise
-}
-
 export async function getTenantKvValue<T = any>(tenantId: string, key: string): Promise<T | null> {
   assertKey(key)
-  if (!isPostgresConfigured()) {
+  if (!isDatabaseConfigured()) {
+    if (!fileFallbackAllowed()) {
+      const err: any = new Error('PostgreSQL não configurado (DATABASE_URL)')
+      err.status = 501
+      throw err
+    }
     const db = await readFileDb()
     const row = db.tenants[tenantId]?.[key]
     if (!row) return null
     log('read.ok', { tenantId, key, store: 'file' })
     return row.value as T
   }
-  await ensureSchema()
-  return await withPgClient(async client => {
-    const res = await client.query<{ value: any }>(`SELECT value FROM sisteq_tenant_kv WHERE tenant_id = $1 AND key = $2`, [
-      tenantId,
-      key,
-    ])
-    const row = res.rows[0]
-    if (!row) return null
-    log('read.ok', { tenantId, key, store: 'pg' })
-    return row.value as T
+  const row = await prisma.sisteqTenantKv.findUnique({
+    where: { tenantId_key: { tenantId, key } },
+    select: { value: true },
   })
+  if (!row) return null
+  log('read.ok', { tenantId, key, store: 'prisma' })
+  return row.value as T
 }
 
 export async function getTenantKvValues(tenantId: string, keys: string[]): Promise<Record<string, any>> {
   assertKeys(keys)
   if (keys.length === 0) return {}
-  if (!isPostgresConfigured()) {
+  if (!isDatabaseConfigured()) {
+    if (!fileFallbackAllowed()) {
+      const err: any = new Error('PostgreSQL não configurado (DATABASE_URL)')
+      err.status = 501
+      throw err
+    }
     const db = await readFileDb()
     const tenant = db.tenants[tenantId] ?? {}
     const out: Record<string, any> = {}
@@ -184,19 +164,14 @@ export async function getTenantKvValues(tenantId: string, keys: string[]): Promi
     log('read.batch.ok', { tenantId, keys: keys.length, found: Object.keys(out).length, store: 'file' })
     return out
   }
-  await ensureSchema()
-  return await withPgClient(async client => {
-    const res = await client.query<{ key: string; value: any }>(
-      `SELECT key, value FROM sisteq_tenant_kv WHERE tenant_id = $1 AND key = ANY($2::text[])`,
-      [tenantId, keys],
-    )
-    const out: Record<string, any> = {}
-    for (const row of res.rows) {
-      if (typeof row.key === 'string' && row.key) out[row.key] = row.value
-    }
-    log('read.batch.ok', { tenantId, keys: keys.length, found: res.rows.length, store: 'pg' })
-    return out
+  const rows = await prisma.sisteqTenantKv.findMany({
+    where: { tenantId, key: { in: keys } },
+    select: { key: true, value: true },
   })
+  const out: Record<string, any> = {}
+  for (const row of rows) out[row.key] = row.value
+  log('read.batch.ok', { tenantId, keys: keys.length, found: rows.length, store: 'prisma' })
+  return out
 }
 
 export async function listTenantKvKeys(
@@ -206,7 +181,12 @@ export async function listTenantKvKeys(
   const prefix = typeof opts.prefix === 'string' ? opts.prefix : ''
   const rawLimit = typeof opts.limit === 'number' ? opts.limit : undefined
   const limit = rawLimit && Number.isFinite(rawLimit) ? Math.max(1, Math.min(1000, Math.floor(rawLimit))) : 200
-  if (!isPostgresConfigured()) {
+  if (!isDatabaseConfigured()) {
+    if (!fileFallbackAllowed()) {
+      const err: any = new Error('PostgreSQL não configurado (DATABASE_URL)')
+      err.status = 501
+      throw err
+    }
     const db = await readFileDb()
     const allKeys = Object.keys(db.tenants[tenantId] ?? {}).filter(k => typeof k === 'string' && k)
     const filtered = prefix.trim().length > 0 ? allKeys.filter(k => k.startsWith(prefix)) : allKeys
@@ -215,28 +195,26 @@ export async function listTenantKvKeys(
     log('list.keys.ok', { tenantId, prefix: prefix || null, limit, count: keys.length, store: 'file' })
     return { keys }
   }
-  await ensureSchema()
-  return await withPgClient(async client => {
-    const res =
-      prefix.trim().length > 0
-        ? await client.query<{ key: string }>(
-            `SELECT key FROM sisteq_tenant_kv WHERE tenant_id = $1 AND key LIKE $2 ORDER BY key ASC LIMIT $3`,
-            [tenantId, `${prefix}%`, limit],
-          )
-        : await client.query<{ key: string }>(
-            `SELECT key FROM sisteq_tenant_kv WHERE tenant_id = $1 ORDER BY key ASC LIMIT $2`,
-            [tenantId, limit],
-          )
-    const keys = res.rows.map(r => r.key).filter(k => typeof k === 'string' && k)
-    log('list.keys.ok', { tenantId, prefix: prefix || null, limit, count: keys.length, store: 'pg' })
-    return { keys }
+  const rows = await prisma.sisteqTenantKv.findMany({
+    where: { tenantId, ...(prefix.trim().length > 0 ? { key: { startsWith: prefix } } : {}) },
+    select: { key: true },
+    orderBy: { key: 'asc' },
+    take: limit,
   })
+  const keys = rows.map(r => r.key)
+  log('list.keys.ok', { tenantId, prefix: prefix || null, limit, count: keys.length, store: 'prisma' })
+  return { keys }
 }
 
 export async function setTenantKvValue(tenantId: string, userId: string, key: string, value: any): Promise<{ ok: true }> {
   assertKey(key)
   assertPayloadSize(value)
-  if (!isPostgresConfigured()) {
+  if (!isDatabaseConfigured()) {
+    if (!fileFallbackAllowed()) {
+      const err: any = new Error('PostgreSQL não configurado (DATABASE_URL)')
+      err.status = 501
+      throw err
+    }
     const db = await readFileDb()
     const t = (db.tenants[tenantId] ??= {})
     const existing = t[key]
@@ -251,23 +229,22 @@ export async function setTenantKvValue(tenantId: string, userId: string, key: st
     log('write.ok', { tenantId, key, userId, bytes: payloadBytes(value), store: 'file' })
     return { ok: true }
   }
-  await ensureSchema()
-  return await withPgTransaction(async client => {
-    await ensureSchemaWithClient(client)
-    await client.query(
-      `
-        INSERT INTO sisteq_tenant_kv (tenant_id, key, value, updated_at, updated_by)
-        VALUES ($1, $2, $3, now(), $4)
-        ON CONFLICT (tenant_id, key) DO UPDATE
-          SET value = EXCLUDED.value,
-              updated_at = now(),
-              updated_by = EXCLUDED.updated_by
-      `,
-      [tenantId, key, value ?? null, userId],
-    )
-    log('write.ok', { tenantId, key, userId, bytes: payloadBytes(value), store: 'pg' })
-    return { ok: true }
+  await prisma.sisteqTenantKv.upsert({
+    where: { tenantId_key: { tenantId, key } },
+    create: {
+      tenantId,
+      key,
+      value: (value ?? Prisma.JsonNull) as Prisma.InputJsonValue,
+      updatedBy: userId,
+    },
+    update: {
+      value: (value ?? Prisma.JsonNull) as Prisma.InputJsonValue,
+      updatedAt: new Date(),
+      updatedBy: userId,
+    },
   })
+  log('write.ok', { tenantId, key, userId, bytes: payloadBytes(value), store: 'prisma' })
+  return { ok: true }
 }
 
 export async function setTenantKvValues(
@@ -290,7 +267,12 @@ export async function setTenantKvValues(
     assertPayloadSize(item?.value)
   }
 
-  if (!isPostgresConfigured()) {
+  if (!isDatabaseConfigured()) {
+    if (!fileFallbackAllowed()) {
+      const err: any = new Error('PostgreSQL não configurado (DATABASE_URL)')
+      err.status = 501
+      throw err
+    }
     const db = await readFileDb()
     const t = (db.tenants[tenantId] ??= {})
     const now = nowIso()
@@ -309,32 +291,38 @@ export async function setTenantKvValues(
     log('write.batch.ok', { tenantId, items: items.length, userId, bytes, store: 'file' })
     return { ok: true }
   }
-  await ensureSchema()
-  return await withPgTransaction(async client => {
-    await ensureSchemaWithClient(client)
-    let bytes = 0
-    for (const item of items) {
-      await client.query(
-        `
-          INSERT INTO sisteq_tenant_kv (tenant_id, key, value, updated_at, updated_by)
-          VALUES ($1, $2, $3, now(), $4)
-          ON CONFLICT (tenant_id, key) DO UPDATE
-            SET value = EXCLUDED.value,
-                updated_at = now(),
-                updated_by = EXCLUDED.updated_by
-        `,
-        [tenantId, item.key, item.value ?? null, userId],
-      )
+  let bytes = 0
+  await prisma.$transaction(
+    items.map(item => {
       bytes += payloadBytes(item.value)
-    }
-    log('write.batch.ok', { tenantId, items: items.length, userId, bytes, store: 'pg' })
-    return { ok: true }
-  })
+      return prisma.sisteqTenantKv.upsert({
+        where: { tenantId_key: { tenantId, key: item.key } },
+        create: {
+          tenantId,
+          key: item.key,
+          value: (item.value ?? Prisma.JsonNull) as Prisma.InputJsonValue,
+          updatedBy: userId,
+        },
+        update: {
+          value: (item.value ?? Prisma.JsonNull) as Prisma.InputJsonValue,
+          updatedAt: new Date(),
+          updatedBy: userId,
+        },
+      })
+    }),
+  )
+  log('write.batch.ok', { tenantId, items: items.length, userId, bytes, store: 'prisma' })
+  return { ok: true }
 }
 
 export async function deleteTenantKvValue(tenantId: string, userId: string, key: string): Promise<{ ok: true }> {
   assertKey(key)
-  if (!isPostgresConfigured()) {
+  if (!isDatabaseConfigured()) {
+    if (!fileFallbackAllowed()) {
+      const err: any = new Error('PostgreSQL não configurado (DATABASE_URL)')
+      err.status = 501
+      throw err
+    }
     const db = await readFileDb()
     const t = db.tenants[tenantId]
     if (t && t[key]) delete t[key]
@@ -342,18 +330,19 @@ export async function deleteTenantKvValue(tenantId: string, userId: string, key:
     log('delete.ok', { tenantId, key, userId, store: 'file' })
     return { ok: true }
   }
-  await ensureSchema()
-  return await withPgTransaction(async client => {
-    await ensureSchemaWithClient(client)
-    await client.query(`DELETE FROM sisteq_tenant_kv WHERE tenant_id = $1 AND key = $2`, [tenantId, key])
-    log('delete.ok', { tenantId, key, userId, store: 'pg' })
-    return { ok: true }
-  })
+  await prisma.sisteqTenantKv.deleteMany({ where: { tenantId, key } })
+  log('delete.ok', { tenantId, key, userId, store: 'prisma' })
+  return { ok: true }
 }
 
 export async function deleteTenantKvValues(tenantId: string, userId: string, keys: string[]): Promise<{ ok: true }> {
   assertKeys(keys)
-  if (!isPostgresConfigured()) {
+  if (!isDatabaseConfigured()) {
+    if (!fileFallbackAllowed()) {
+      const err: any = new Error('PostgreSQL não configurado (DATABASE_URL)')
+      err.status = 501
+      throw err
+    }
     const db = await readFileDb()
     const t = db.tenants[tenantId]
     if (t) {
@@ -365,13 +354,9 @@ export async function deleteTenantKvValues(tenantId: string, userId: string, key
     log('delete.batch.ok', { tenantId, keys: keys.length, userId, store: 'file' })
     return { ok: true }
   }
-  await ensureSchema()
-  return await withPgTransaction(async client => {
-    await ensureSchemaWithClient(client)
-    if (keys.length > 0) {
-      await client.query(`DELETE FROM sisteq_tenant_kv WHERE tenant_id = $1 AND key = ANY($2::text[])`, [tenantId, keys])
-    }
-    log('delete.batch.ok', { tenantId, keys: keys.length, userId, store: 'pg' })
-    return { ok: true }
-  })
+  if (keys.length > 0) {
+    await prisma.sisteqTenantKv.deleteMany({ where: { tenantId, key: { in: keys } } })
+  }
+  log('delete.batch.ok', { tenantId, keys: keys.length, userId, store: 'prisma' })
+  return { ok: true }
 }

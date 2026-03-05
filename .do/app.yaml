@@ -29,12 +29,39 @@ services:
       - key: NODE_ENV
         value: production
         scope: RUN_TIME
+      - key: DATABASE_URL
+        value: ${DATABASE_URL}
+        type: SECRET
+        scope: RUN_TIME
+      - key: SISTEQ_SESSION_SECRET
+        value: ${SISTEQ_SESSION_SECRET}
+        type: SECRET
+        scope: RUN_TIME
       - key: HOSTNAME
         value: 0.0.0.0
         scope: RUN_TIME
       - key: NEXT_TELEMETRY_DISABLED
         value: "1"
         scope: RUN_TIME
+      - key: PRISMA_HIDE_UPDATE_MESSAGE
+        value: "1"
+        scope: RUN_TIME
       - key: PGSSLMODE
         value: require
+        scope: RUN_TIME
+      - key: SISTEQ_PROFILE_STORE
+        value: pg
+        scope: RUN_TIME
+      - key: SISTEQ_EMAIL_VERIFICATION_MODE
+        value: token
+        scope: RUN_TIME
+      - key: SISTEQ_ACCESS_LOGS
+        value: "1"
+        scope: RUN_TIME
+      - key: SISTEQ_DB_LOGS
+        value: "1"
+        scope: RUN_TIME
+      - key: OPENROUTER_API_KEY
+        value: ${OPENROUTER_API_KEY}
+        type: SECRET
         scope: RUN_TIME

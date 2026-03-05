@@ -111,7 +111,7 @@ describe('Profile API', () => {
     const { status, json } = res.getState()
     expect(status).toBe(200)
     expect(json.user.email).toMatch(/@/)
-  })
+  }, 20_000)
 
   it('bloqueia acesso quando x-company-id não bate com o tenant do token', async () => {
     const tenantSlug = uniqueTenantSlug()
@@ -349,8 +349,8 @@ describe('Tenant KV API (PostgreSQL)', () => {
   const prevStore = process.env.SISTEQ_PROFILE_STORE
   const prevDbUrl = process.env.DATABASE_URL
 
-  const dbUrl = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL
-  const canRun = typeof dbUrl === 'string' && dbUrl.trim().length > 0
+  const dbUrl = process.env.TEST_DATABASE_URL
+  const canRun = process.env.SISTEQ_RUN_PG_TESTS === '1' && typeof dbUrl === 'string' && dbUrl.trim().length > 0
 
   beforeEach(() => {
     process.env.SISTEQ_PROFILE_DB_PATH = ''

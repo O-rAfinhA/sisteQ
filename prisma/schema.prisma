@@ -1,0 +1,60 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+}
+
+model StrategicPlanningState {
+  tenantId    String   @id @map("tenant_id")
+  currentYear String   @map("current_year")
+  updatedAt   DateTime @default(now()) @map("updated_at")
+  updatedBy   String   @map("updated_by")
+
+  @@map("strategic_planning_state")
+}
+
+model StrategicPlanningYear {
+  tenantId  String   @map("tenant_id")
+  year      String
+  data      Json
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @map("updated_at")
+  updatedBy String   @map("updated_by")
+
+  @@id([tenantId, year])
+  @@index([tenantId], map: "strategic_planning_years_tenant_idx")
+  @@map("strategic_planning_years")
+}
+
+model SisteqProfileDb {
+  id        String   @id
+  data      Json
+  updatedAt DateTime @default(now()) @map("updated_at")
+
+  @@map("sisteq_profile_db")
+}
+
+model SisteqProfileDbBackup {
+  id        String   @id
+  createdAt DateTime @default(now()) @map("created_at")
+  data      Json
+
+  @@index([createdAt], map: "sisteq_profile_db_backups_created_at_idx")
+  @@map("sisteq_profile_db_backups")
+}
+
+model SisteqTenantKv {
+  tenantId  String   @map("tenant_id")
+  key       String
+  value     Json
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @map("updated_at")
+  updatedBy String   @map("updated_by")
+
+  @@id([tenantId, key])
+  @@index([tenantId], map: "sisteq_tenant_kv_tenant_idx")
+  @@map("sisteq_tenant_kv")
+}

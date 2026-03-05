@@ -4,7 +4,7 @@ import { promises as fs } from 'fs'
 import { TextEncoder } from 'util'
 import bcrypt from 'bcryptjs'
 import { SignJWT, jwtVerify } from 'jose'
-import { isPostgresConfigured, withPgClient, withPgTransaction } from '@/server/pg'
+import { isDatabaseConfigured, prisma } from '@/server/prisma'
 
 export type ProfilePreferences = {
   theme: 'system' | 'light' | 'dark'
@@ -147,9 +147,6 @@ const SESSION_COOKIE_NAME = 'sisteq_session'
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
 
 let writeQueue = Promise.resolve()
-let profilePgSchemaReady = false
-let profilePgSchemaPromise: Promise<void> | null = null
-
 const PROFILE_DB_MAIN_ID = 'main'
 const PROFILE_DB_LOCK_KEY = 718203401
 
@@ -165,7 +162,7 @@ function profileStoreKind(): 'file' | 'pg' {
   const raw = typeof process.env.SISTEQ_PROFILE_STORE === 'string' ? process.env.SISTEQ_PROFILE_STORE.trim().toLowerCase() : ''
   if (raw === 'file') return 'file'
   if (raw === 'pg') return 'pg'
-  if (isPostgresConfigured()) return 'pg'
+  if (process.env.NODE_ENV === 'production') return 'pg'
   return 'file'
 }
 
@@ -191,80 +188,46 @@ function emptyDb(): DbShape {
   }
 }
 
-async function ensureProfilePgSchema() {
-  if (profilePgSchemaReady) return
-  if (profilePgSchemaPromise) return await profilePgSchemaPromise
-  profilePgSchemaPromise = (async () => {
-    await withPgClient(async client => {
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS sisteq_profile_db (
-          id TEXT PRIMARY KEY,
-          data JSONB NOT NULL,
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        )
-      `)
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS sisteq_profile_db_backups (
-          id TEXT PRIMARY KEY,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-          data JSONB NOT NULL
-        )
-      `)
-      await client.query(`CREATE INDEX IF NOT EXISTS sisteq_profile_db_backups_created_at_idx ON sisteq_profile_db_backups (created_at)`)
-    })
-    profilePgSchemaReady = true
-    profilePgSchemaPromise = null
-  })()
-  return await profilePgSchemaPromise
-}
-
 async function readDbPg(): Promise<DbShape> {
-  if (!isPostgresConfigured()) {
-    const err: any = new Error('PostgreSQL não configurado (DATABASE_URL ou PGHOST)')
+  if (!isDatabaseConfigured()) {
+    const err: any = new Error('PostgreSQL não configurado (DATABASE_URL)')
     err.status = 501
     throw err
   }
-  await ensureProfilePgSchema()
-  return await withPgClient(async client => {
-    const res = await client.query<{ data: any }>(`SELECT data FROM sisteq_profile_db WHERE id = $1`, [PROFILE_DB_MAIN_ID])
-    const row = res.rows[0]
-    if (!row) return emptyDb()
-    const parsed = (row.data ?? {}) as Partial<DbShape>
-    const base = emptyDb()
-    return {
-      ...base,
-      ...parsed,
-      tenants: parsed.tenants ?? base.tenants,
-      users: parsed.users ?? base.users,
-      audits: parsed.audits ?? base.audits,
-      refreshTokens: parsed.refreshTokens ?? base.refreshTokens,
-      emailVerificationTokens: parsed.emailVerificationTokens ?? base.emailVerificationTokens,
-      passwordResetTokens: parsed.passwordResetTokens ?? base.passwordResetTokens,
-      tenantBySlug: parsed.tenantBySlug ?? base.tenantBySlug,
-      userByTenantEmail: parsed.userByTenantEmail ?? base.userByTenantEmail,
-    }
+  const row = await prisma.sisteqProfileDb.findUnique({
+    where: { id: PROFILE_DB_MAIN_ID },
+    select: { data: true },
   })
+  if (!row) return emptyDb()
+  const parsed = (row.data ?? {}) as Partial<DbShape>
+  const base = emptyDb()
+  return {
+    ...base,
+    ...parsed,
+    tenants: parsed.tenants ?? base.tenants,
+    users: parsed.users ?? base.users,
+    audits: parsed.audits ?? base.audits,
+    refreshTokens: parsed.refreshTokens ?? base.refreshTokens,
+    emailVerificationTokens: parsed.emailVerificationTokens ?? base.emailVerificationTokens,
+    passwordResetTokens: parsed.passwordResetTokens ?? base.passwordResetTokens,
+    tenantBySlug: parsed.tenantBySlug ?? base.tenantBySlug,
+    userByTenantEmail: parsed.userByTenantEmail ?? base.userByTenantEmail,
+  }
 }
 
 async function writeDbPg(next: DbShape) {
-  if (!isPostgresConfigured()) {
-    const err: any = new Error('PostgreSQL não configurado (DATABASE_URL ou PGHOST)')
+  if (!isDatabaseConfigured()) {
+    const err: any = new Error('PostgreSQL não configurado (DATABASE_URL)')
     err.status = 501
     throw err
   }
-  await ensureProfilePgSchema()
-  await withPgTransaction(async client => {
-    await client.query(`SELECT pg_advisory_xact_lock($1::bigint)`, [PROFILE_DB_LOCK_KEY])
-    await client.query(
-      `
-        INSERT INTO sisteq_profile_db (id, data, updated_at)
-        VALUES ($1, $2, now())
-        ON CONFLICT (id) DO UPDATE
-          SET data = EXCLUDED.data,
-              updated_at = now()
-      `,
-      [PROFILE_DB_MAIN_ID, next as any],
-    )
+  await prisma.$transaction(async tx => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${PROFILE_DB_LOCK_KEY})`
+    await tx.sisteqProfileDb.upsert({
+      where: { id: PROFILE_DB_MAIN_ID },
+      create: { id: PROFILE_DB_MAIN_ID, data: next as any, updatedAt: new Date() },
+      update: { data: next as any, updatedAt: new Date() },
+    })
   })
 }
 
@@ -1771,18 +1734,17 @@ function assertCleanupConfirmToken(token: string, expectedDigest: string, nowMs:
 
 async function createProfileDbBackup() {
   if (profileStoreKind() === 'pg') {
-    if (!isPostgresConfigured()) {
-      const err: any = new Error('PostgreSQL não configurado (DATABASE_URL ou PGHOST)')
+    if (!isDatabaseConfigured()) {
+      const err: any = new Error('PostgreSQL não configurado (DATABASE_URL)')
       err.status = 501
       throw err
     }
-    await ensureProfilePgSchema()
     const backupId = randomId('profile_backup')
-    await withPgTransaction(async client => {
-      await client.query(`SELECT pg_advisory_xact_lock($1::bigint)`, [PROFILE_DB_LOCK_KEY])
-      const res = await client.query<{ data: any }>(`SELECT data FROM sisteq_profile_db WHERE id = $1`, [PROFILE_DB_MAIN_ID])
-      const snapshot = res.rows[0]?.data ?? emptyDb()
-      await client.query(`INSERT INTO sisteq_profile_db_backups (id, data) VALUES ($1, $2)`, [backupId, snapshot])
+    await prisma.$transaction(async tx => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${PROFILE_DB_LOCK_KEY})`
+      const res = await tx.sisteqProfileDb.findUnique({ where: { id: PROFILE_DB_MAIN_ID }, select: { data: true } })
+      const snapshot = res?.data ?? emptyDb()
+      await tx.sisteqProfileDbBackup.create({ data: { id: backupId, data: snapshot as any } })
     })
     return `pg:${backupId}`
   }
@@ -1807,27 +1769,21 @@ async function restoreProfileDbFromBackup(backupPath: string) {
   if (raw.startsWith('pg:')) {
     const backupId = raw.slice('pg:'.length).trim()
     if (!backupId) throw new ValidationError('Backup inválido')
-    if (!isPostgresConfigured()) {
-      const err: any = new Error('PostgreSQL não configurado (DATABASE_URL ou PGHOST)')
+    if (!isDatabaseConfigured()) {
+      const err: any = new Error('PostgreSQL não configurado (DATABASE_URL)')
       err.status = 501
       throw err
     }
-    await ensureProfilePgSchema()
-    await withPgTransaction(async client => {
-      await client.query(`SELECT pg_advisory_xact_lock($1::bigint)`, [PROFILE_DB_LOCK_KEY])
-      const b = await client.query<{ data: any }>(`SELECT data FROM sisteq_profile_db_backups WHERE id = $1`, [backupId])
-      const snapshot = b.rows[0]?.data
+    await prisma.$transaction(async tx => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${PROFILE_DB_LOCK_KEY})`
+      const b = await tx.sisteqProfileDbBackup.findUnique({ where: { id: backupId }, select: { data: true } })
+      const snapshot = b?.data
       if (!snapshot) throw new NotFoundError('Backup não encontrado')
-      await client.query(
-        `
-          INSERT INTO sisteq_profile_db (id, data, updated_at)
-          VALUES ($1, $2, now())
-          ON CONFLICT (id) DO UPDATE
-            SET data = EXCLUDED.data,
-                updated_at = now()
-        `,
-        [PROFILE_DB_MAIN_ID, snapshot],
-      )
+      await tx.sisteqProfileDb.upsert({
+        where: { id: PROFILE_DB_MAIN_ID },
+        create: { id: PROFILE_DB_MAIN_ID, data: snapshot as any, updatedAt: new Date() },
+        update: { data: snapshot as any, updatedAt: new Date() },
+      })
     })
     return
   }

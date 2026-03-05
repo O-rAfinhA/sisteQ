@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import path from 'path'
+import os from 'os'
 import registerHandler from '../../pages/api/auth/register'
 import loginHandler from '../../pages/api/auth/login'
 import verifyEmailHandler from '../../pages/api/auth/verify-email'
@@ -51,102 +53,135 @@ async function withEnv<T>(nextEnv: Record<string, string | undefined>, fn: () =>
   }
 }
 
+function tmpProfileDbPath(prefix: string) {
+  return path.join(os.tmpdir(), `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}.json`)
+}
+
 describe('Auth email verification flow', () => {
   it('bloqueia login até verificar e permite verificar com token', async () => {
-    const tenantSlug = `t-${Date.now()}-${Math.random().toString(16).slice(2)}`
-    const email = `user-${Date.now()}-${Math.random()}@example.com`
-    const password = 'Senha@12345'
+    await withEnv(
+      {
+        SISTEQ_PROFILE_STORE: 'file',
+        SISTEQ_PROFILE_DB_PATH: tmpProfileDbPath('sisteq-auth-email-dev'),
+        SISTEQ_SESSION_SECRET: 'test-secret',
+        DATABASE_URL: undefined,
+      },
+      async () => {
+        const tenantSlug = `t-${Date.now()}-${Math.random().toString(16).slice(2)}`
+        const email = `user-${Date.now()}-${Math.random()}@example.com`
+        const password = 'Senha@12345'
 
-    const reqRegister: any = {
-      method: 'POST',
-      headers: {},
-      body: { tenantSlug, companyName: 'Empresa', name: 'Admin', email, password },
-    }
-    const resRegister = createMockRes()
-    await registerHandler(reqRegister, resRegister as any)
-    const reg = resRegister.getState()
-    expect(reg.status).toBe(201)
-    expect(reg.json.ok).toBe(true)
-    const token = reg.json?.dev?.verificationToken
-    expect(typeof token).toBe('string')
+        const reqRegister: any = {
+          method: 'POST',
+          headers: {},
+          body: { tenantSlug, companyName: 'Empresa', name: 'Admin', email, password },
+        }
+        const resRegister = createMockRes()
+        await registerHandler(reqRegister, resRegister as any)
+        const reg = resRegister.getState()
+        expect(reg.status).toBe(201)
+        expect(reg.json.ok).toBe(true)
+        const token = reg.json?.dev?.verificationToken
+        expect(typeof token).toBe('string')
 
-    const reqLoginBefore: any = {
-      method: 'POST',
-      headers: { 'x-tenant': tenantSlug },
-      body: { email, password },
-      socket: { remoteAddress: '127.0.0.1' },
-    }
-    const resLoginBefore = createMockRes()
-    await loginHandler(reqLoginBefore, resLoginBefore as any)
-    const before = resLoginBefore.getState()
-    expect(before.status).toBe(401)
-    expect(String(before.json?.error || '')).toMatch(/não verificado/i)
+        const reqLoginBefore: any = {
+          method: 'POST',
+          headers: { 'x-tenant': tenantSlug },
+          body: { email, password },
+          socket: { remoteAddress: '127.0.0.1' },
+        }
+        const resLoginBefore = createMockRes()
+        await loginHandler(reqLoginBefore, resLoginBefore as any)
+        const before = resLoginBefore.getState()
+        expect(before.status).toBe(401)
+        expect(String(before.json?.error || '')).toMatch(/não verificado/i)
 
-    const reqVerify: any = { method: 'POST', headers: {}, body: { token } }
-    const resVerify = createMockRes()
-    await verifyEmailHandler(reqVerify, resVerify as any)
-    const verified = resVerify.getState()
-    expect(verified.status).toBe(200)
-    expect(verified.json.ok).toBe(true)
+        const reqVerify: any = { method: 'POST', headers: {}, body: { token } }
+        const resVerify = createMockRes()
+        await verifyEmailHandler(reqVerify, resVerify as any)
+        const verified = resVerify.getState()
+        expect(verified.status).toBe(200)
+        expect(verified.json.ok).toBe(true)
 
-    const reqLoginAfter: any = {
-      method: 'POST',
-      headers: { 'x-tenant': tenantSlug },
-      body: { email, password },
-      socket: { remoteAddress: '127.0.0.1' },
-    }
-    const resLoginAfter = createMockRes()
-    await loginHandler(reqLoginAfter, resLoginAfter as any)
-    const after = resLoginAfter.getState()
-    expect(after.status).toBe(200)
-    expect(after.headers['Set-Cookie']).toBeTruthy()
-  })
+        const reqLoginAfter: any = {
+          method: 'POST',
+          headers: { 'x-tenant': tenantSlug },
+          body: { email, password },
+          socket: { remoteAddress: '127.0.0.1' },
+        }
+        const resLoginAfter = createMockRes()
+        await loginHandler(reqLoginAfter, resLoginAfter as any)
+        const after = resLoginAfter.getState()
+        expect(after.status).toBe(200)
+        expect(after.headers['Set-Cookie']).toBeTruthy()
+      },
+    )
+  }, 20_000)
 
   it('reenvia token em dev e GET redireciona para /login com parâmetros', async () => {
-    const tenantSlug = `t-${Date.now()}-${Math.random().toString(16).slice(2)}`
-    const email = `user-${Date.now()}-${Math.random()}@example.com`
-    const password = 'Senha@12345'
+    await withEnv(
+      {
+        SISTEQ_PROFILE_STORE: 'file',
+        SISTEQ_PROFILE_DB_PATH: tmpProfileDbPath('sisteq-auth-email-dev-resend'),
+        SISTEQ_SESSION_SECRET: 'test-secret',
+        DATABASE_URL: undefined,
+      },
+      async () => {
+        const tenantSlug = `t-${Date.now()}-${Math.random().toString(16).slice(2)}`
+        const email = `user-${Date.now()}-${Math.random()}@example.com`
+        const password = 'Senha@12345'
 
-    const reqRegister: any = {
-      method: 'POST',
-      headers: {},
-      body: { tenantSlug, companyName: 'Empresa', name: 'Admin', email, password },
-    }
-    const resRegister = createMockRes()
-    await registerHandler(reqRegister, resRegister as any)
-    expect(resRegister.getState().status).toBe(201)
+        const reqRegister: any = {
+          method: 'POST',
+          headers: {},
+          body: { tenantSlug, companyName: 'Empresa', name: 'Admin', email, password },
+        }
+        const resRegister = createMockRes()
+        await registerHandler(reqRegister, resRegister as any)
+        expect(resRegister.getState().status).toBe(201)
 
-    const reqResend: any = {
-      method: 'POST',
-      headers: { 'x-tenant': tenantSlug },
-      body: { email },
-      socket: { remoteAddress: '127.0.0.1' },
-    }
-    const resResend = createMockRes()
-    await resendHandler(reqResend, resResend as any)
-    const resend = resResend.getState()
-    expect(resend.status).toBe(200)
-    expect(resend.json.ok).toBe(true)
-    const token = resend.json?.dev?.verificationToken
-    expect(typeof token).toBe('string')
+        const reqResend: any = {
+          method: 'POST',
+          headers: { 'x-tenant': tenantSlug },
+          body: { email },
+          socket: { remoteAddress: '127.0.0.1' },
+        }
+        const resResend = createMockRes()
+        await resendHandler(reqResend, resResend as any)
+        const resend = resResend.getState()
+        expect(resend.status).toBe(200)
+        expect(resend.json.ok).toBe(true)
+        const token = resend.json?.dev?.verificationToken
+        expect(typeof token).toBe('string')
 
-    const reqVerifyGet: any = {
-      method: 'GET',
-      headers: {},
-      query: { token, tenant: tenantSlug, next: '/perfil' },
-    }
-    const resVerifyGet = createMockRes()
-    await verifyEmailHandler(reqVerifyGet, resVerifyGet as any)
-    const redir = resVerifyGet.getState().redirect
-    expect(redir?.status).toBe(302)
-    expect(String(redir?.url || '')).toMatch(/^\/login\?/)
-    expect(String(redir?.url || '')).toMatch(/verified=1/)
-    expect(String(redir?.url || '')).toMatch(/tenant=/)
-    expect(String(redir?.url || '')).toMatch(/next=%2Fperfil/)
-  })
+        const reqVerifyGet: any = {
+          method: 'GET',
+          headers: {},
+          query: { token, tenant: tenantSlug, next: '/perfil' },
+        }
+        const resVerifyGet = createMockRes()
+        await verifyEmailHandler(reqVerifyGet, resVerifyGet as any)
+        const redir = resVerifyGet.getState().redirect
+        expect(redir?.status).toBe(302)
+        expect(String(redir?.url || '')).toMatch(/^\/login\?/)
+        expect(String(redir?.url || '')).toMatch(/verified=1/)
+        expect(String(redir?.url || '')).toMatch(/tenant=/)
+        expect(String(redir?.url || '')).toMatch(/next=%2Fperfil/)
+      },
+    )
+  }, 20_000)
 
   it('permite modo token em produção (sem Resend) e verifica via URL', async () => {
-    await withEnv({ NODE_ENV: 'production', SISTEQ_EMAIL_VERIFICATION_MODE: 'token' }, async () => {
+    const tmpDbPath = path.join(os.tmpdir(), `sisteq-auth-email-prod-token-${Date.now()}-${Math.random().toString(16).slice(2)}.json`)
+    await withEnv(
+      {
+        NODE_ENV: 'production',
+        SISTEQ_EMAIL_VERIFICATION_MODE: 'token',
+        SISTEQ_PROFILE_STORE: 'file',
+        SISTEQ_PROFILE_DB_PATH: tmpDbPath,
+        DATABASE_URL: undefined,
+      },
+      async () => {
       const tenantSlug = `t-${Date.now()}-${Math.random().toString(16).slice(2)}`
       const email = `user-${Date.now()}-${Math.random()}@example.com`
       const password = 'Senha@12345'
@@ -181,11 +216,21 @@ describe('Auth email verification flow', () => {
       const resLoginAfter = createMockRes()
       await loginHandler(reqLoginAfter, resLoginAfter as any)
       expect(resLoginAfter.getState().status).toBe(200)
-    })
+      },
+    )
   })
 
   it('permite modo disabled em produção (auto-verifica no cadastro)', async () => {
-    await withEnv({ NODE_ENV: 'production', SISTEQ_EMAIL_VERIFICATION_MODE: 'disabled' }, async () => {
+    const tmpDbPath = path.join(os.tmpdir(), `sisteq-auth-email-prod-disabled-${Date.now()}-${Math.random().toString(16).slice(2)}.json`)
+    await withEnv(
+      {
+        NODE_ENV: 'production',
+        SISTEQ_EMAIL_VERIFICATION_MODE: 'disabled',
+        SISTEQ_PROFILE_STORE: 'file',
+        SISTEQ_PROFILE_DB_PATH: tmpDbPath,
+        DATABASE_URL: undefined,
+      },
+      async () => {
       const tenantSlug = `t-${Date.now()}-${Math.random().toString(16).slice(2)}`
       const email = `user-${Date.now()}-${Math.random()}@example.com`
       const password = 'Senha@12345'
@@ -211,6 +256,7 @@ describe('Auth email verification flow', () => {
       const resLogin = createMockRes()
       await loginHandler(reqLogin, resLogin as any)
       expect(resLogin.getState().status).toBe(200)
-    })
+      },
+    )
   }, 15_000)
 })

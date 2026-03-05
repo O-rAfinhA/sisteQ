@@ -41,7 +41,7 @@ Para habilitar logs de operações de banco:
 
 ### Criação de tabelas
 
-Execute o script [postgres_schema.sql](file:///c:/Users/User/Documents/Rafa/Planejamento%20Estrat%C3%A9gico/V2/SisteQ%20-%20Finalizado%2027.02.26/db/postgres_schema.sql) no banco.
+Execute o script [postgres_schema.sql](../db/postgres_schema.sql) no banco.
 
 O serviço também executa `CREATE TABLE IF NOT EXISTS` automaticamente no primeiro uso.
 
@@ -94,10 +94,10 @@ Gera logs estruturados (JSON) nos endpoints principais, com `tenantId`, `userId`
 Os seguintes testes automatizados validam isolamento e não persistência cruzada:
 
 - Cache local (escopo por tenant):
-  - [tenantLocalStorageShim.test.ts](file:///c:/Users/User/Documents/Rafa/Planejamento%20Estrat%C3%A9gico/V2/SisteQ%20-%20Finalizado%2027.02.26/src/app/utils/tenantLocalStorageShim.test.ts)
+  - [tenantLocalStorageShim.test.ts](../src/app/utils/tenantLocalStorageShim.test.ts)
   - Cenários: escrita/leitura com dois tenants e migração de chave legada.
 - API Planejamento Estratégico (PostgreSQL):
-  - [strategic.api.test.ts](file:///c:/Users/User/Documents/Rafa/Planejamento%20Estrat%C3%A9gico/V2/SisteQ%20-%20Finalizado%2027.02.26/src/server/strategic.api.test.ts)
+  - [strategic.api.test.ts](../src/server/strategic.api.test.ts)
   - Cenários: persistência após logout/login e isolamento entre dois tenants.
 
 Para executar:
