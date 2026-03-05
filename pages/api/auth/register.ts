@@ -37,6 +37,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   try {
     const { tenant, user } = await registerTenantAndUser((req.body ?? {}) as any)
     const token = await createEmailVerificationToken(tenant.id, user.id)
+    const mode = emailVerificationMode()
+
+    if (mode === 'disabled') {
+      await verifyEmailByToken(token)
+      res.status(201).json({ ok: true, emailVerified: true })
+      return
+    }
+
     if (process.env.NODE_ENV !== 'production') {
       res.status(201).json({ ok: true, dev: { verificationToken: token } })
       return
@@ -46,13 +54,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const verificationUrl = `${proto}://${host}/api/auth/verify-email?token=${encodeURIComponent(token)}&tenant=${encodeURIComponent(
       tenant.slug,
     )}`
-
-    const mode = emailVerificationMode()
-    if (mode === 'disabled') {
-      await verifyEmailByToken(token)
-      res.status(201).json({ ok: true, emailVerified: true })
-      return
-    }
 
     if (mode === 'token') {
       res.status(201).json({ ok: true, emailSent: false, verificationUrl })
