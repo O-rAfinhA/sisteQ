@@ -4,23 +4,18 @@ import {
   CheckCircle2, 
   Clock,
   XCircle,
-  Edit2,
-  Download,
   AlertTriangle,
   FileCheck,
   Building2,
   Hash
 } from 'lucide-react';
 import { Badge } from '../ui/badge';
-import { Button } from '../ui/button';
 import { DocumentoLicenca } from '../../pages/DocumentosLicencas';
 import { capitalizarTitulo } from '../../utils/formatters';
 
 interface DocumentoLicencaHeaderProps {
   documento: DocumentoLicenca;
   tipoNome?: string;
-  onEditar?: () => void;
-  onBaixarAnexo?: () => void;
 }
 
 // Função para obter informações do status
@@ -83,7 +78,7 @@ const getStatusInfo = (status: string) => {
   }
 };
 
-export function DocumentoLicencaHeader({ documento, tipoNome, onEditar, onBaixarAnexo }: DocumentoLicencaHeaderProps) {
+export function DocumentoLicencaHeader({ documento, tipoNome }: DocumentoLicencaHeaderProps) {
   const statusInfo = getStatusInfo(documento.status);
   const StatusIcon = statusInfo.icon;
   const tituloFormatado = capitalizarTitulo(documento.nomeDocumento);
@@ -181,28 +176,6 @@ export function DocumentoLicencaHeader({ documento, tipoNome, onEditar, onBaixar
 
         {/* Botões de ação no canto superior direito */}
         <div className="absolute top-4 right-4 flex items-center gap-2">
-          {onEditar && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="bg-white/80 backdrop-blur-sm gap-1.5"
-              onClick={onEditar}
-            >
-              <Edit2 className="w-3.5 h-3.5" />
-              Editar
-            </Button>
-          )}
-          {onBaixarAnexo && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="bg-white/80 backdrop-blur-sm gap-1.5"
-              onClick={onBaixarAnexo}
-            >
-              <Download className="w-3.5 h-3.5" />
-              Baixar
-            </Button>
-          )}
           <Badge variant="outline" className="text-xs bg-white/80 backdrop-blur-sm">
             Licença
           </Badge>

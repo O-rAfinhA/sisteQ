@@ -10,8 +10,6 @@ import {
   XCircle,
   FileX,
   Shield,
-  Edit2,
-  Download,
   FileDown
 } from 'lucide-react';
 import { Badge } from '../ui/badge';
@@ -21,8 +19,6 @@ import { DocumentoInterno } from '../../pages/DocumentosInternos';
 interface DocumentoInternoHeaderProps {
   documento: DocumentoInterno;
   tipoNome?: string;
-  onEditar?: () => void;
-  onBaixarAnexo?: () => void;
   onExportarPDF?: () => void;
   isAnexoMode?: boolean;
 }
@@ -96,7 +92,7 @@ const getStatusInfo = (status: string) => {
   }
 };
 
-export function DocumentoInternoHeader({ documento, tipoNome, onEditar, onBaixarAnexo, onExportarPDF, isAnexoMode }: DocumentoInternoHeaderProps) {
+export function DocumentoInternoHeader({ documento, tipoNome, onExportarPDF, isAnexoMode }: DocumentoInternoHeaderProps) {
   const statusInfo = getStatusInfo(documento.status);
   const StatusIcon = statusInfo.icon;
   const tituloFormatado = capitalizarTitulo(documento.nome);
@@ -236,28 +232,6 @@ export function DocumentoInternoHeader({ documento, tipoNome, onEditar, onBaixar
         {tipoNome && (
           <div className="absolute top-4 right-4 flex items-center gap-2">
             {/* Botões de ação */}
-            {onEditar && (
-              <Button
-                size="sm"
-                variant="outline"
-                className="bg-white/80 backdrop-blur-sm gap-1.5"
-                onClick={onEditar}
-              >
-                <Edit2 className="w-3.5 h-3.5" />
-                Editar
-              </Button>
-            )}
-            {onBaixarAnexo && (
-              <Button
-                size="sm"
-                variant="outline"
-                className="bg-white/80 backdrop-blur-sm gap-1.5"
-                onClick={onBaixarAnexo}
-              >
-                <Download className="w-3.5 h-3.5" />
-                Baixar
-              </Button>
-            )}
             {onExportarPDF && (
               <Button
                 size="sm"

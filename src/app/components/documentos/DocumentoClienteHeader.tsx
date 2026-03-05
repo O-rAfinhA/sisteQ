@@ -5,21 +5,16 @@ import {
   Clock,
   AlertTriangle,
   XCircle,
-  Edit2,
-  Download,
   UserSquare,
   FileText,
   Package
 } from 'lucide-react';
 import { Badge } from '../ui/badge';
-import { Button } from '../ui/button';
 import { DocumentoCliente } from '../../pages/DocumentosClientesNovo';
 import { capitalizarTitulo, formatarDataPtBr } from '../../utils/formatters';
 
 interface DocumentoClienteHeaderProps {
   documento: DocumentoCliente;
-  onEditar?: () => void;
-  onBaixarAnexo?: () => void;
 }
 
 // Função para obter informações do status
@@ -73,7 +68,7 @@ const getStatusInfo = (status: string) => {
   }
 };
 
-export function DocumentoClienteHeader({ documento, onEditar, onBaixarAnexo }: DocumentoClienteHeaderProps) {
+export function DocumentoClienteHeader({ documento }: DocumentoClienteHeaderProps) {
   const statusInfo = getStatusInfo(documento.status);
   const StatusIcon = statusInfo.icon;
   const tituloFormatado = capitalizarTitulo(documento.nomeDocumento);
@@ -176,35 +171,6 @@ export function DocumentoClienteHeader({ documento, onEditar, onBaixarAnexo }: D
               </span>
             </div>
           </div>
-        </div>
-
-        {/* Botões de ação no canto superior direito */}
-        <div className="absolute top-4 right-4 flex items-center gap-2">
-          {onEditar && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="bg-white/80 backdrop-blur-sm gap-1.5"
-              onClick={onEditar}
-            >
-              <Edit2 className="w-3.5 h-3.5" />
-              Editar
-            </Button>
-          )}
-          {onBaixarAnexo && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="bg-white/80 backdrop-blur-sm gap-1.5"
-              onClick={onBaixarAnexo}
-            >
-              <Download className="w-3.5 h-3.5" />
-              Baixar
-            </Button>
-          )}
-          <Badge variant="outline" className="text-xs bg-white/80 backdrop-blur-sm">
-            Documento de Cliente
-          </Badge>
         </div>
       </div>
 

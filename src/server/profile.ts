@@ -236,6 +236,7 @@ async function readDb(): Promise<DbShape> {
   await ensureDbDir()
   try {
     const raw = await fs.readFile(dbFilePath(), 'utf8')
+    if (!raw.trim()) return emptyDb()
     const parsed = JSON.parse(raw) as Partial<DbShape>
     const base = emptyDb()
     return {

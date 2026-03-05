@@ -1,4 +1,4 @@
-import React, { useContext, useMemo } from 'react'
+import React, { useCallback, useContext, useMemo } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/router'
 
@@ -54,7 +54,7 @@ export function useLocation() {
 export function useNavigate() {
   const router = useRouter()
   const ctx = useContext(RouterContext)
-  return (to: string | number, options?: { replace?: boolean; state?: any }) => {
+  return useCallback((to: string | number, options?: { replace?: boolean; state?: any }) => {
     if (typeof to === 'number') {
       router.back()
       return
@@ -68,7 +68,7 @@ export function useNavigate() {
       return
     }
     router.push(href)
-  }
+  }, [ctx?.params?.companyId, router])
 }
 
 export function useParams<TParams extends Record<string, string> = Record<string, string>>() {
@@ -91,7 +91,7 @@ export function useSearchParams(): [
 
   const sp = useMemo(() => new URLSearchParams(search.startsWith('?') ? search.slice(1) : search), [search])
 
-  const setSearchParams = (
+  const setSearchParams = useCallback((
     nextInit: Record<string, string> | URLSearchParams,
     options?: { replace?: boolean }
   ) => {
@@ -108,7 +108,7 @@ export function useSearchParams(): [
       return
     }
     router.push(href)
-  }
+  }, [ctx?.params?.companyId, ctx?.pathname, router])
 
   return [sp, setSearchParams]
 }

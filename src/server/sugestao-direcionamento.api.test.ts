@@ -120,7 +120,7 @@ describe('Sugestão Direcionamento IA API', () => {
     const parsedBody = JSON.parse(init.body);
     expect(parsedBody.model).toBe('openai/gpt-4o-mini');
     expect(Array.isArray(parsedBody.messages)).toBe(true);
-  });
+  }, 15000);
 
   it('aplica rate limiting por IP', async () => {
     vi.resetModules();

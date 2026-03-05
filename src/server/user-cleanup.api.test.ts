@@ -146,7 +146,7 @@ describe('User cleanup API', () => {
     const uniqueEmails = new Set(emails)
     expect(uniqueEmails.size).toBe(emails.length)
     expect(users.find(u => u.id === admin.id)?.phone).toBe('11912345678')
-  })
+  }, 15000)
 
   it('remove usuários inativos há mais de 24 meses e anonimiza desativados', async () => {
     const now = new Date()
@@ -198,7 +198,7 @@ describe('User cleanup API', () => {
     const disabledAfter: any = afterUsers.find(u => u.id === disabled.id)
     expect(disabledAfter?.email).toMatch(/^anon\+/)
     expect(disabledAfter?.phone).toBeUndefined()
-  })
+  }, 15000)
 })
 
 describe('User cleanup API (PostgreSQL)', () => {

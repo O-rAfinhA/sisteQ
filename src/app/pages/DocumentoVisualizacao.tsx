@@ -4,13 +4,12 @@ import {
   ArrowLeft, 
   FileEdit, 
   Paperclip, 
-  Edit2, 
-  Download, 
   FileDown, 
   User, 
   Building2, 
   Calendar, 
   File,
+  Download,
   History,
   GitBranch,
   Eye
@@ -87,28 +86,30 @@ export default function DocumentoVisualizacao() {
   };
 
   useEffect(() => {
-    const { storageKey, basePath, tiposStorageKey } = getStorageKeyAndBasePath();
-    
-    // Carregar documento
-    const documentos = getFromStorage<any[]>(storageKey, []);
-    const doc = documentos.find(d => d.id === id);
-    if (doc) {
-      setDocumento(doc);
+    let cancelled = false;
+    try {
+      const { storageKey, basePath, tiposStorageKey } = getStorageKeyAndBasePath();
 
-      // Carregar tipo do documento
-      const tipos = getFromStorage<TipoDocumento[]>(tiposStorageKey, []);
-      const tipo = tipos.find(t => t.id === doc.tipoId);
-      setTipoDocumento(tipo || null);
-    } else {
-      toast.error('Documento não encontrado');
+      const documentos = getFromStorage<any[]>(storageKey, []);
+      const doc = documentos.find(d => d.id === id);
+      if (doc) {
+        if (!cancelled) setDocumento(doc);
+        const tipos = getFromStorage<TipoDocumento[]>(tiposStorageKey, []);
+        const tipo = tipos.find(t => t.id === doc.tipoId);
+        if (!cancelled) setTipoDocumento(tipo || null);
+      } else {
+        toast.error('Documento não encontrado');
+        navigate(basePath);
+      }
+    } catch {
+      toast.error('Falha ao carregar o documento');
+      const { basePath } = getStorageKeyAndBasePath();
       navigate(basePath);
     }
+    return () => {
+      cancelled = true;
+    };
   }, [id, navigate, location.pathname]);
-
-  const handleEditar = () => {
-    const { basePath } = getStorageKeyAndBasePath();
-    navigate(`${basePath}/${id}/editar`);
-  };
 
   const handleVoltar = () => {
     const { basePath } = getStorageKeyAndBasePath();
@@ -121,8 +122,11 @@ export default function DocumentoVisualizacao() {
       return;
     }
 
-    // Criar blob do base64
-    const byteCharacters = atob(documento.arquivoBase64.split(',')[1]);
+    const base64Part = documento.arquivoBase64.includes(',')
+      ? documento.arquivoBase64.split(',')[1]
+      : documento.arquivoBase64;
+
+    const byteCharacters = atob(base64Part);
     const byteNumbers = new Array(byteCharacters.length);
     for (let i = 0; i < byteCharacters.length; i++) {
       byteNumbers[i] = byteCharacters.charCodeAt(i);
@@ -130,7 +134,6 @@ export default function DocumentoVisualizacao() {
     const byteArray = new Uint8Array(byteNumbers);
     const blob = new Blob([byteArray], { type: documento.arquivoTipo });
 
-    // Download
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -194,36 +197,26 @@ export default function DocumentoVisualizacao() {
           <DocumentoInternoHeader
             documento={documento as DocumentoInterno}
             tipoNome={tipoDocumento?.nome}
-            onEditar={handleEditar}
-            onBaixarAnexo={isAnexoMode && documento.arquivoBase64 ? handleBaixarAnexo : undefined}
             onExportarPDF={!isAnexoMode && documento.conteudoHtml ? handleExportarPDF : undefined}
             isAnexoMode={isAnexoMode}
           />
         ) : isDocumentoCliente ? (
           <DocumentoClienteHeader
             documento={documento as DocumentoCliente}
-            onEditar={handleEditar}
-            onBaixarAnexo={documento.arquivoBase64 ? handleBaixarAnexo : undefined}
           />
         ) : isDocumentoExterno ? (
           <DocumentoExternoHeader
             documento={documento as DocumentoExterno}
-            onEditar={handleEditar}
-            onBaixarAnexo={documento.arquivoBase64 ? handleBaixarAnexo : undefined}
           />
         ) : isDocumentoLicenca ? (
           <DocumentoLicencaHeader
             documento={documento as DocumentoLicenca}
             tipoNome={tipoDocumento?.nome}
-            onEditar={handleEditar}
-            onBaixarAnexo={documento.arquivoBase64 ? handleBaixarAnexo : undefined}
           />
         ) : isDocumentoCertidao ? (
           <DocumentoCertidaoHeader
             documento={documento as DocumentoCertidao}
             tipoNome={tipoDocumento?.nome}
-            onEditar={handleEditar}
-            onBaixarAnexo={documento.arquivoBase64 ? handleBaixarAnexo : undefined}
           />
         ) : (
           <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6">
@@ -258,24 +251,6 @@ export default function DocumentoVisualizacao() {
               </div>
 
               <div className="flex gap-2">
-                <Button 
-                  onClick={handleEditar} 
-                  variant="outline" 
-                  className="gap-2"
-                >
-                  <Edit2 className="w-4 h-4" />
-                  Editar
-                </Button>
-                {documento.arquivoBase64 && (
-                  <Button
-                    onClick={handleBaixarAnexo}
-                    variant="outline"
-                    className="gap-2"
-                  >
-                    <Download className="w-4 h-4" />
-                    Baixar Arquivo
-                  </Button>
-                )}
                 {hasHtmlContent && (
                   <Button
                     onClick={handleExportarPDF}
@@ -337,40 +312,6 @@ export default function DocumentoVisualizacao() {
             </div>
           </div>
         )}
-
-        {/* Botões de ação adicionais se necessário */}
-        {!isDocumentoInterno && (
-          <div className="flex gap-2 mb-6">
-            <Button 
-              onClick={handleEditar} 
-              variant="outline" 
-              className="gap-2"
-            >
-              <Edit2 className="w-4 h-4" />
-              Editar
-            </Button>
-            {documento.arquivoBase64 && (
-              <Button
-                onClick={handleBaixarAnexo}
-                variant="outline"
-                className="gap-2"
-              >
-                <Download className="w-4 h-4" />
-                Baixar Arquivo
-              </Button>
-            )}
-            {hasHtmlContent && (
-              <Button
-                onClick={handleExportarPDF}
-                variant="outline"
-                className="gap-2"
-              >
-                <FileDown className="w-4 h-4" />
-                Exportar PDF
-              </Button>
-            )}
-          </div>
-        )}
       </div>
 
       {/* Conteúdo do Documento */}
@@ -408,7 +349,7 @@ export default function DocumentoVisualizacao() {
               {isPdf ? (
                 <div className="w-full bg-gray-200">
                   <iframe 
-                    src={documento.arquivoBase64} 
+                    src={`${documento.arquivoBase64}#toolbar=0&navpanes=0&scrollbar=0`} 
                     className="w-full h-[800px] border-0" 
                     title={documento.arquivoNome}
                   />
@@ -420,8 +361,7 @@ export default function DocumentoVisualizacao() {
                   </div>
                   <h3 className="text-lg font-medium text-gray-900 mb-2">Arquivo Anexado</h3>
                   <p className="text-gray-500 max-w-sm mb-6">
-                    Este documento possui um anexo que não pode ser visualizado diretamente aqui.
-                    Utilize o botão abaixo para baixar e visualizar.
+                    Este documento possui um anexo que não pode ser visualizado diretamente nesta tela.
                   </p>
                   <Button onClick={handleBaixarAnexo} className="gap-2">
                     <Download className="w-4 h-4" />

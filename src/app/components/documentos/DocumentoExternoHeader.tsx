@@ -6,21 +6,16 @@ import {
   Clock,
   AlertTriangle,
   XCircle,
-  Edit2,
-  Download,
   ExternalLink,
   FileText,
   Hash
 } from 'lucide-react';
 import { Badge } from '../ui/badge';
-import { Button } from '../ui/button';
 import { DocumentoExterno } from '../../pages/DocumentosExternosNovo';
 import { capitalizarTitulo, formatarDataPtBr } from '../../utils/formatters';
 
 interface DocumentoExternoHeaderProps {
   documento: DocumentoExterno;
-  onEditar?: () => void;
-  onBaixarAnexo?: () => void;
 }
 
 // Função para obter informações do status
@@ -83,7 +78,7 @@ const getStatusInfo = (status: string) => {
   }
 };
 
-export function DocumentoExternoHeader({ documento, onEditar, onBaixarAnexo }: DocumentoExternoHeaderProps) {
+export function DocumentoExternoHeader({ documento }: DocumentoExternoHeaderProps) {
   const statusInfo = getStatusInfo(documento.status);
   const StatusIcon = statusInfo.icon;
   const tituloFormatado = capitalizarTitulo(documento.nomeDocumento);
@@ -177,28 +172,6 @@ export function DocumentoExternoHeader({ documento, onEditar, onBaixarAnexo }: D
 
         {/* Botões de ação no canto superior direito */}
         <div className="absolute top-4 right-4 flex items-center gap-2">
-          {onEditar && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="bg-white/80 backdrop-blur-sm gap-1.5"
-              onClick={onEditar}
-            >
-              <Edit2 className="w-3.5 h-3.5" />
-              Editar
-            </Button>
-          )}
-          {onBaixarAnexo && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="bg-white/80 backdrop-blur-sm gap-1.5"
-              onClick={onBaixarAnexo}
-            >
-              <Download className="w-3.5 h-3.5" />
-              Baixar
-            </Button>
-          )}
           <Badge variant="outline" className="text-xs bg-white/80 backdrop-blur-sm">
             Documento Externo
           </Badge>
