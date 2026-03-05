@@ -192,7 +192,9 @@ export default function DocumentoLicencaEditor() {
         toast.error('Arquivo/anexo muito grande para persistir no servidor. Reduza o tamanho do arquivo.');
         return;
       }
-      toast.error('Falha ao persistir no servidor. Os dados ficaram apenas no navegador.');
+      const suffix = result.status ? ` (HTTP ${result.status})` : '';
+      const detail = result.error ? `: ${result.error}` : '';
+      toast.error(`Falha ao persistir no servidor${suffix}${detail}`);
     });
     toast.success(isEditMode ? 'Licença atualizada!' : 'Licença criada!');
     navigate('/documentos/licencas');

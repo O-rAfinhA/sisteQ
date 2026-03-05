@@ -59,7 +59,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         const res = await fetch('/api/profile/me', { credentials: 'same-origin' });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = (await res.json()) as any;
-        const tenantId = String(data?.tenant?.id ?? data?.tenantId ?? '').trim();
+        const tenantId = String(data?.user?.tenant?.id ?? data?.tenant?.id ?? data?.tenantId ?? data?.user?.tenantId ?? '').trim();
         if (!tenantId) throw new Error('Missing tenantId');
         setTenantIdToSession(tenantId);
         installTenantLocalStorageShim(tenantId);

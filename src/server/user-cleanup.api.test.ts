@@ -149,8 +149,10 @@ describe('User cleanup API', () => {
   })
 
   it('remove usuários inativos há mais de 24 meses e anonimiza desativados', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-03-03T00:00:00.000Z'))
+    const now = new Date()
+    const msPerMonth = 30 * 24 * 60 * 60 * 1000
+    const inactiveUpdatedAt = new Date(now.getTime() - 25 * msPerMonth).toISOString()
+    const disabledAt = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString()
 
     const tenantSlug = `acme-${Date.now()}-${Math.random().toString(16).slice(2)}`
     const { tenant, user: admin } = await registerTenantAndUser({
@@ -176,8 +178,8 @@ describe('User cleanup API', () => {
     const db = await readDb(dbPath)
     const inactiveKey = `${tenant.id}:${inactive.id}`
     const disabledKey = `${tenant.id}:${disabled.id}`
-    db.users[inactiveKey].updatedAt = '2023-01-01T00:00:00.000Z'
-    db.users[disabledKey].disabledAt = '2026-02-01T00:00:00.000Z'
+    db.users[inactiveKey].updatedAt = inactiveUpdatedAt
+    db.users[disabledKey].disabledAt = disabledAt
     db.users[disabledKey].phone = '+55 (11) 99999-8888'
     await writeDb(dbPath, db)
 

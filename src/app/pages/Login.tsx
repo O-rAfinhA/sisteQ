@@ -59,7 +59,7 @@ export default function Login() {
       const meRes = await fetch('/api/profile/me', { method: 'GET', credentials: 'same-origin' });
       const meData = await meRes.json().catch(() => null);
       if (!meRes.ok) return;
-      const tenantId = String(meData?.tenant?.id ?? meData?.tenantId ?? '').trim();
+      const tenantId = String(meData?.user?.tenant?.id ?? meData?.tenant?.id ?? meData?.tenantId ?? meData?.user?.tenantId ?? '').trim();
       if (!tenantId) return;
       setTenantIdToSession(tenantId);
       installTenantLocalStorageShim(tenantId);

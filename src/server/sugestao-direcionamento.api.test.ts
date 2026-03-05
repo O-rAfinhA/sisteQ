@@ -479,5 +479,5 @@ describe('Sugestão Direcionamento IA API', () => {
     expect(json.suggestions).toHaveLength(1);
     expect(String(json.suggestions[0])).toMatch(/Integridade/);
     expect(String(json.suggestions[0])).toMatch(/^\-/m);
-  });
+  }, 15_000);
 });

@@ -235,10 +235,33 @@ describe('resetApplication', () => {
 
     stubLocationReplace()
 
-    const docs = [{ id: 'd1', nomeDocumento: 'Doc', arquivoBase64: 'data:application/pdf;base64,AAAA' }]
+    const payloads: Array<{ key: string; value: any }> = [
+      {
+        key: STORAGE_KEYS.DOCS_CLIENTES,
+        value: [{ id: 'd1', nomeDocumento: 'Doc cliente', arquivoBase64: 'data:application/pdf;base64,AAAA' }],
+      },
+      {
+        key: STORAGE_KEYS.DOCS_INTERNOS,
+        value: [{ id: 'd2', nome: 'Doc interno', conteudoHtml: '<p>ok</p>' }],
+      },
+      {
+        key: STORAGE_KEYS.DOCS_EXTERNOS,
+        value: [{ id: 'd3', nome: 'Doc externo', arquivoBase64: 'data:application/pdf;base64,BBBB' }],
+      },
+      {
+        key: STORAGE_KEYS.DOCS_LICENCAS,
+        value: [{ id: 'd4', nome: 'Licença', arquivoBase64: 'data:application/pdf;base64,CCCC' }],
+      },
+      {
+        key: STORAGE_KEYS.DOCS_CERTIDOES,
+        value: [{ id: 'd5', nome: 'Certidão', arquivoBase64: 'data:application/pdf;base64,DDDD' }],
+      },
+    ]
 
     installTenantLocalStorageShim('tenantA')
-    window.localStorage.setItem(STORAGE_KEYS.DOCS_CLIENTES, JSON.stringify(docs))
+    for (const p of payloads) {
+      window.localStorage.setItem(p.key, JSON.stringify(p.value))
+    }
 
     await resetApplication({
       redirectTo: '/login?logout=1',
@@ -248,7 +271,9 @@ describe('resetApplication', () => {
       clearHistory: false,
     })
 
-    expect(serverKv.get(STORAGE_KEYS.DOCS_CLIENTES)).toEqual(docs)
+    for (const p of payloads) {
+      expect(serverKv.get(p.key)).toEqual(p.value)
+    }
 
     uninstallTenantLocalStorageShim()
     Object.defineProperty(window, 'localStorage', { value: createStorage(), configurable: true })
@@ -262,11 +287,66 @@ describe('resetApplication', () => {
       '/api/profile/kv/batch',
       expect.objectContaining({ method: 'POST' }),
     )
-    expect(lastBatchKeys).toContain(STORAGE_KEYS.DOCS_CLIENTES)
-    expect(Object.prototype.hasOwnProperty.call(lastBatchValues, STORAGE_KEYS.DOCS_CLIENTES)).toBe(true)
+    for (const p of payloads) {
+      expect(lastBatchKeys).toContain(p.key)
+      expect(Object.prototype.hasOwnProperty.call(lastBatchValues, p.key)).toBe(true)
+    }
     const raw = window.localStorage as any
-    expect(raw.__data.has(`tenantA::${STORAGE_KEYS.DOCS_CLIENTES}`)).toBe(true)
-    expect(window.localStorage.getItem(STORAGE_KEYS.DOCS_CLIENTES)).toBe(JSON.stringify(docs))
+    for (const p of payloads) {
+      expect(raw.__data.has(`tenantA::${p.key}`)).toBe(true)
+      expect(window.localStorage.getItem(p.key)).toBe(JSON.stringify(p.value))
+    }
+    vi.useRealTimers()
+  })
+
+  it('perde documentos após logout quando KV falha no servidor', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.fn(async (input: any, init?: any) => {
+      const url = typeof input === 'string' ? input : input?.url
+
+      if (url === '/api/profile/kv') {
+        return { ok: false, status: 500, json: async () => ({ error: 'db down' }) } as any
+      }
+
+      if (url === '/api/profile/kv/batch') {
+        return { ok: true, json: async () => ({ values: {} }) } as any
+      }
+
+      if (String(url).startsWith('/api/profile/kv/list')) {
+        return { ok: true, json: async () => ({ keys: [] }) } as any
+      }
+
+      if (url === '/api/auth/cleanup') return { ok: true, json: async () => ({}) } as any
+      if (url === '/api/auth/logout') return { ok: true, json: async () => ({}) } as any
+
+      return { ok: true, json: async () => ({}) } as any
+    })
+    vi.stubGlobal('fetch', fetchMock as any)
+
+    stubLocationReplace()
+
+    const docs = [{ id: 'd1', nomeDocumento: 'Doc', arquivoBase64: 'data:application/pdf;base64,AAAA' }]
+
+    installTenantLocalStorageShim('tenantA')
+    window.localStorage.setItem(STORAGE_KEYS.DOCS_CLIENTES, JSON.stringify(docs))
+
+    await resetApplication({
+      redirectTo: '/login?logout=1',
+      clearIndexedDb: false,
+      clearCacheStorage: false,
+      unregisterServiceWorkers: false,
+      clearHistory: false,
+    })
+
+    uninstallTenantLocalStorageShim()
+    Object.defineProperty(window, 'localStorage', { value: createStorage(), configurable: true })
+    Object.defineProperty(window, 'sessionStorage', { value: createStorage(), configurable: true })
+
+    installTenantLocalStorageShim('tenantA')
+    await vi.runAllTimersAsync()
+    await waitForTenantKvHydration('tenantA')
+
+    expect(window.localStorage.getItem(STORAGE_KEYS.DOCS_CLIENTES)).toBe(null)
     vi.useRealTimers()
   })
 })
