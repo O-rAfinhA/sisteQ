@@ -42,6 +42,11 @@ Opcionais (dependem de features):
 
 - `SISTEQ_SUPER_ADMIN_TOKEN`
 - `OPENROUTER_API_KEY`
+- Verificação de e-mail:
+  - `SISTEQ_EMAIL_VERIFICATION_MODE` (`required` | `token` | `disabled`)
+    - `required` (padrão): envia e-mail de verificação e bloqueia login até confirmar
+    - `token`: não envia e-mail, mas retorna URL de verificação para consumo por outro canal
+    - `disabled`: auto-verifica no cadastro (útil para ambientes controlados, staging e desenvolvimento)
 - Google OAuth:
   - `SISTEQ_GOOGLE_CLIENT_ID`
   - `SISTEQ_GOOGLE_CLIENT_SECRET`
