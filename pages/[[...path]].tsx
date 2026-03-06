@@ -24,7 +24,7 @@ function buildCompanyPath(companyId: string | null, innerPathname: string) {
 }
 
 const ROUTES: Array<{ pattern: string; routeKey: string }> = [
-  { pattern: '/', routeKey: 'DirecionamentoEstrategico' },
+  { pattern: '/', routeKey: 'Landing' },
   { pattern: '/login', routeKey: 'Login' },
   { pattern: '/gestao-estrategica', routeKey: 'DirecionamentoEstrategico' },
   { pattern: '/gestao-estrategica/cenario', routeKey: 'CenarioOrganizacional' },
@@ -226,9 +226,22 @@ export const getServerSideProps: GetServerSideProps<{
   const fullPath = `${pathname}${toQueryString(searchParams)}`
   const reqForAuth = { headers: context.req.headers as any, method: 'GET' } as any
 
-  if (match.routeKey !== 'Login') {
+  if (match.routeKey !== 'Login' && match.routeKey !== 'Landing') {
     try {
       const auth = await requireAuthFromRequest(reqForAuth)
+
+      if (auth.mustChangePassword) {
+        const wantsPasswordTab =
+          match.routeKey === 'Perfil' && typeof searchParams.tab === 'string' && searchParams.tab === 'password'
+        if (!wantsPasswordTab) {
+          return {
+            redirect: {
+              destination: `${buildCompanyPath(auth.tenantId, '/perfil')}?tab=password`,
+              permanent: false,
+            },
+          }
+        }
+      }
 
       if (!companyId) {
         return {
@@ -258,7 +271,7 @@ export const getServerSideProps: GetServerSideProps<{
       }
       throw e
     }
-  } else {
+  } else if (match.routeKey === 'Login') {
     try {
       const auth = await requireAuthFromRequest(reqForAuth)
       const rawNext = typeof searchParams.next === 'string' ? searchParams.next : '/'
@@ -268,6 +281,18 @@ export const getServerSideProps: GetServerSideProps<{
       return {
         redirect: {
           destination: buildCompanyPath(auth.tenantId, nextInner),
+          permanent: false,
+        },
+      }
+    } catch (e: any) {
+      if (!(e instanceof AuthError)) throw e
+    }
+  } else if (match.routeKey === 'Landing') {
+    try {
+      const auth = await requireAuthFromRequest(reqForAuth)
+      return {
+        redirect: {
+          destination: buildCompanyPath(auth.tenantId, '/gestao-estrategica'),
           permanent: false,
         },
       }

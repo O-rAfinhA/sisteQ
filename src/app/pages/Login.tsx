@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
@@ -6,7 +6,7 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
-import { installTenantFetchShim, installTenantLocalStorageShim, setTenantIdToSession } from '../utils/helpers';
+import { installTenantFetchShim, installTenantLocalStorageShim, setTenantIdToSession, trackEvent } from '../utils/helpers';
 
 type Mode = 'login' | 'forgot' | 'register';
 
@@ -43,7 +43,14 @@ export default function Login() {
     return raw;
   }, [searchParams]);
 
-  const [mode, setMode] = useState<Mode>('login');
+  const initialMode = useMemo<Mode>(() => {
+    const raw = (searchParams.get('mode') || '').trim();
+    if (raw === 'register') return 'register';
+    if (raw === 'forgot') return 'forgot';
+    return 'login';
+  }, [searchParams]);
+
+  const [mode, setMode] = useState<Mode>(() => initialMode);
   const [tenantSlug, setTenantSlug] = useState(defaultTenant);
   const [companyName, setCompanyName] = useState('');
   const [name, setName] = useState('');
@@ -53,6 +60,12 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [showResend, setShowResend] = useState(false);
   const [resendLoading, setResendLoading] = useState(false);
+
+  useEffect(() => {
+    if (mode === 'register') {
+      trackEvent('signup_view', { next });
+    }
+  }, [mode, next]);
 
   const hydrateTenantScope = async () => {
     try {
@@ -156,6 +169,7 @@ export default function Login() {
     setLoading(true);
     setShowResend(false);
     try {
+      trackEvent('signup_submit', { next });
       const result = await apiJson<{
         ok: true;
         emailSent?: boolean;
@@ -175,6 +189,7 @@ export default function Login() {
 
       const verificationToken = result?.dev?.verificationToken;
       if (verificationToken) {
+        trackEvent('signup_success', { next, mode: 'dev_auto_verify' });
         await apiJson<{ ok: true }>('/api/auth/verify-email', {
           method: 'POST',
           body: JSON.stringify({ token: verificationToken }),
@@ -190,6 +205,7 @@ export default function Login() {
       }
 
       if (result?.emailVerified) {
+        trackEvent('signup_success', { next, mode: 'email_verified' });
         await apiJson<{ user: any }>('/api/auth/login', {
           method: 'POST',
           body: JSON.stringify({ email, password }),
@@ -201,6 +217,7 @@ export default function Login() {
       }
 
       if (result?.verificationUrl) {
+        trackEvent('signup_success', { next, mode: 'email_verification_required' });
         window.location.href = result.verificationUrl;
         return;
       }
@@ -211,6 +228,7 @@ export default function Login() {
       setPassword('');
       setConfirmPassword('');
     } catch (err: any) {
+      trackEvent('signup_error', { next, message: String(err?.message || '') });
       toast.error(err?.message || 'Falha ao criar conta');
     } finally {
       setLoading(false);
@@ -385,7 +403,10 @@ export default function Login() {
                   <button
                     type="button"
                     className="text-blue-700 hover:underline"
-                    onClick={() => setMode('register')}
+                    onClick={() => {
+                      trackEvent('login_to_register_click', { next });
+                      setMode('register');
+                    }}
                     disabled={loading}
                   >
                     Criar conta

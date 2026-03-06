@@ -98,6 +98,7 @@ export function Funcoes() {
   };
 
   const totalAtivos = funcoes.filter(f => f.ativo).length;
+  const isManagingRecord = isAdding || Boolean(editingId);
 
   return (
     <div className="p-8 max-w-[1400px] mx-auto space-y-8">
@@ -108,13 +109,15 @@ export function Funcoes() {
               <Briefcase className="w-8 h-8 text-orange-600" />
               <h1 className="text-gray-900 tracking-tight" style={{ fontSize: '1.75rem', fontWeight: 600, lineHeight: 1.3 }}>Cadastro de Funções</h1>
             </div>
-            <Button
-              onClick={() => setIsAdding(true)}
-              className="flex items-center gap-2 bg-orange-600 text-white hover:bg-orange-700"
-            >
-              <Plus className="w-4 h-4" />
-              Nova Função
-            </Button>
+            {!isManagingRecord && (
+              <Button
+                onClick={() => setIsAdding(true)}
+                className="flex items-center gap-2 bg-orange-600 text-white hover:bg-orange-700"
+              >
+                <Plus className="w-4 h-4" />
+                Nova Função
+              </Button>
+            )}
           </div>
         </div>
 
@@ -231,13 +234,15 @@ export function Funcoes() {
               <p className="text-gray-600 mb-4">
                 Comece adicionando uma nova função
               </p>
-              <button
-                onClick={() => setIsAdding(true)}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors"
-              >
-                <Plus className="w-4 h-4" />
-                Nova Função
-              </button>
+              {!isManagingRecord && (
+                <button
+                  onClick={() => setIsAdding(true)}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors"
+                >
+                  <Plus className="w-4 h-4" />
+                  Nova Função
+                </button>
+              )}
             </div>
           ) : (
             <div className="overflow-x-auto">

@@ -4,6 +4,7 @@ import { RouterCompatProvider } from '@/router'
 import { ErrorBoundary } from '@/app/components/ErrorBoundary'
 import RootLayout from '@/app/components/RootLayout'
 
+import Landing from '@/app/pages/Landing'
 import DirecionamentoEstrategico from '@/app/pages/DirecionamentoEstrategico'
 import CenarioOrganizacional from '@/app/pages/CenarioOrganizacional'
 import AnaliseSwot from '@/app/pages/AnaliseSwot'
@@ -128,6 +129,8 @@ export function LegacyRouteRenderer({
     switch (routeKey) {
       case 'DirecionamentoEstrategico':
         return <DirecionamentoEstrategico />
+      case 'Landing':
+        return <Landing />
       case 'CenarioOrganizacional':
         return <CenarioOrganizacional />
       case 'PartesInteressadas':
@@ -299,7 +302,7 @@ export function LegacyRouteRenderer({
     }
   }, [routeKey])
 
-  const useRootLayout = routeKey !== 'Login'
+  const useRootLayout = routeKey !== 'Login' && routeKey !== 'Landing'
 
   return (
     <RouterCompatProvider pathname={pathname} search={search} params={params}>

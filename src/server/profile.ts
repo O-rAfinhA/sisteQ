@@ -63,6 +63,7 @@ export type UserProfile = {
   avatarUrl: string
   phone?: string
   department?: string
+  mustChangePassword?: boolean
   disabledAt?: string | null
   createdAt: string
   updatedAt: string
@@ -605,7 +606,12 @@ export async function requireAuthFromRequest(req: { headers: Record<string, any>
 
   const user = await getUserById(ctx.tenantId, ctx.userId)
   if (user.disabledAt) throw new AuthError('Usuário desativado')
-  return { userId: ctx.userId, tenantId: ctx.tenantId, role: user.role }
+  return {
+    userId: ctx.userId,
+    tenantId: ctx.tenantId,
+    role: user.role,
+    mustChangePassword: Boolean(user.mustChangePassword),
+  }
 }
 
 function normalizeEmail(value: string) {
@@ -680,6 +686,11 @@ async function findTenantBySlug(slugRaw: string) {
   const existingId = db.tenantBySlug[slug]
   if (!existingId) return null
   return db.tenants[existingId] ?? null
+}
+
+export async function getTenantById(tenantId: string) {
+  const db = await readDb()
+  return db.tenants[tenantId] ?? null
 }
 
 async function getUserById(tenantId: string, userId: string) {
@@ -791,6 +802,7 @@ export async function upsertGoogleUser(
     updatedAt: createdAt,
     passwordHash: null,
     emailVerifiedAt: nowIso(),
+    mustChangePassword: false,
     googleSub: sub,
     preferences: { ...DEFAULT_PREFERENCES },
     notificationSettings: { ...DEFAULT_NOTIFICATION_SETTINGS },
@@ -989,6 +1001,7 @@ export async function registerTenantAndUser(payload: {
     updatedAt: createdAt,
     passwordHash: await hashPassword(password),
     emailVerifiedAt: null,
+    mustChangePassword: false,
     preferences: { ...DEFAULT_PREFERENCES },
     notificationSettings: { ...DEFAULT_NOTIFICATION_SETTINGS },
     privacy: { ...DEFAULT_PRIVACY },
@@ -1101,6 +1114,7 @@ export async function resetPasswordWithToken(tokenRaw: unknown, newPasswordRaw: 
   const nextHash = await hashPassword(newPassword)
   await mutateUser(rec.tenantId, rec.userId, u => {
     u.passwordHash = nextHash
+    u.mustChangePassword = false
     u.activity.unshift({
       id: randomId('act'),
       type: 'password.changed',
@@ -1123,6 +1137,7 @@ function publicUser(u: UserProfile) {
     avatarUrl: u.avatarUrl,
     phone: u.phone,
     department: u.department,
+    mustChangePassword: Boolean(u.mustChangePassword),
     disabledAt: u.disabledAt ?? null,
     createdAt: u.createdAt,
     updatedAt: u.updatedAt,
@@ -1178,6 +1193,7 @@ export async function createUserAsAdmin(
     updatedAt: createdAt,
     passwordHash: await hashPassword(password),
     emailVerifiedAt: nowIso(),
+    mustChangePassword: true,
     preferences: { ...DEFAULT_PREFERENCES },
     notificationSettings: { ...DEFAULT_NOTIFICATION_SETTINGS },
     privacy: { ...DEFAULT_PRIVACY },
@@ -2041,21 +2057,33 @@ export async function changePassword(
   userId: string,
   payload: { currentPassword?: unknown; newPassword?: unknown }
 ) {
-  assertNonEmptyString(payload.currentPassword, 'Senha atual')
   assertNonEmptyString(payload.newPassword, 'Nova senha')
-  const currentPassword = String(payload.currentPassword)
   const newPassword = String(payload.newPassword)
 
   assertStrongPassword(newPassword)
-  if (newPassword === currentPassword) throw new ValidationError('Nova senha deve ser diferente da senha atual')
 
   const user = await getUserById(tenantId, userId)
-  const ok = await verifyPassword(currentPassword, user.passwordHash)
-  if (!ok) throw new ValidationError('Senha atual incorreta')
+  const hasCurrentPassword = typeof payload.currentPassword === 'string' && payload.currentPassword.trim().length > 0
+  if (!user.mustChangePassword) {
+    if (!hasCurrentPassword) throw new ValidationError('Senha atual é obrigatório')
+    const currentPassword = String(payload.currentPassword)
+    if (newPassword === currentPassword) throw new ValidationError('Nova senha deve ser diferente da senha atual')
+    const ok = await verifyPassword(currentPassword, user.passwordHash)
+    if (!ok) throw new ValidationError('Senha atual incorreta')
+  } else {
+    const sameAsExisting = await verifyPassword(newPassword, user.passwordHash)
+    if (sameAsExisting) throw new ValidationError('Nova senha deve ser diferente da senha temporária')
+    if (hasCurrentPassword) {
+      const currentPassword = String(payload.currentPassword)
+      const ok = await verifyPassword(currentPassword, user.passwordHash)
+      if (!ok) throw new ValidationError('Senha temporária incorreta')
+    }
+  }
 
   const nextHash = await hashPassword(newPassword)
   await mutateUser(tenantId, userId, u => {
     u.passwordHash = nextHash
+    u.mustChangePassword = false
     u.activity.unshift({
       id: randomId('act'),
       type: 'password.changed',

@@ -69,6 +69,7 @@ type PublicUser = {
   avatarUrl: string
   phone?: string
   department?: string
+  mustChangePassword?: boolean
   preferences: ProfilePreferences
   notificationSettings: ProfileNotificationSettings
   privacy: ProfilePrivacySettings
@@ -145,6 +146,8 @@ export function Perfil() {
   const [bootstrapping, setBootstrapping] = useState(true)
   const [user, setUser] = useState<PublicUser | null>(null)
 
+  const mustChangePassword = Boolean(user?.mustChangePassword)
+
   const [savingProfile, setSavingProfile] = useState(false)
   const [savingPassword, setSavingPassword] = useState(false)
   const [savingPreferences, setSavingPreferences] = useState(false)
@@ -168,6 +171,7 @@ export function Perfil() {
   const [passwordForm, setPasswordForm] = useState({
     currentPassword: '',
     newPassword: '',
+    confirmNewPassword: '',
   })
 
   const [preferencesForm, setPreferencesForm] = useState<ProfilePreferences>({
@@ -276,6 +280,14 @@ export function Perfil() {
     }
   }, [tab, user, activity, tickets, notifications])
 
+  useEffect(() => {
+    if (!mustChangePassword) return
+    if (tab === 'password') return
+    const nextSp = new URLSearchParams(sp)
+    nextSp.set('tab', 'password')
+    setSp(nextSp, { replace: true })
+  }, [mustChangePassword, setSp, sp, tab])
+
   const effectiveEmail = useMemo(() => {
     if (!user) return ''
     if (privacyForm.showEmail) return profileForm.email
@@ -305,13 +317,21 @@ export function Perfil() {
   }
 
   const handleChangePassword = async () => {
+    if (passwordForm.newPassword !== passwordForm.confirmNewPassword) {
+      toast.error('As senhas não conferem')
+      return
+    }
     setSavingPassword(true)
     try {
       await apiJson<{ ok: true }>('/api/profile/password', {
         method: 'PUT',
-        body: JSON.stringify(passwordForm),
+        body: JSON.stringify({
+          currentPassword: passwordForm.currentPassword.trim() ? passwordForm.currentPassword : undefined,
+          newPassword: passwordForm.newPassword,
+        }),
       })
-      setPasswordForm({ currentPassword: '', newPassword: '' })
+      setPasswordForm({ currentPassword: '', newPassword: '', confirmNewPassword: '' })
+      setUser(u => (u ? { ...u, mustChangePassword: false } : u))
       toast.success('Senha alterada')
       setActivity(null)
     } catch (e: any) {
@@ -458,9 +478,26 @@ export function Perfil() {
       )}
 
       <div className="bg-white rounded-xl border border-gray-200 p-5">
-        <Tabs value={tab} onValueChange={setTab}>
+        <Tabs
+          value={tab}
+          onValueChange={next => {
+            if (mustChangePassword && next !== 'password') return
+            setTab(next)
+          }}
+        >
+          {mustChangePassword && (
+            <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+              <div>
+                <div className="font-semibold leading-tight">Troca de senha obrigatória</div>
+                <div className="text-amber-800 leading-tight mt-0.5">
+                  Para continuar usando o sistema, defina uma nova senha agora.
+                </div>
+              </div>
+            </div>
+          )}
           <TabsList className="w-full justify-start">
-            <TabsTrigger value="profile" className="gap-2">
+            <TabsTrigger value="profile" className="gap-2" disabled={mustChangePassword}>
               <User className="w-4 h-4" />
               Informações
             </TabsTrigger>
@@ -468,23 +505,23 @@ export function Perfil() {
               <Lock className="w-4 h-4" />
               Senha
             </TabsTrigger>
-            <TabsTrigger value="preferences" className="gap-2">
+            <TabsTrigger value="preferences" className="gap-2" disabled={mustChangePassword}>
               <SlidersHorizontal className="w-4 h-4" />
               Preferências
             </TabsTrigger>
-            <TabsTrigger value="notifications" className="gap-2">
+            <TabsTrigger value="notifications" className="gap-2" disabled={mustChangePassword}>
               <Bell className="w-4 h-4" />
               Notificações{unreadCount > 0 ? ` (${unreadCount})` : ''}
             </TabsTrigger>
-            <TabsTrigger value="activity" className="gap-2">
+            <TabsTrigger value="activity" className="gap-2" disabled={mustChangePassword}>
               <History className="w-4 h-4" />
               Atividades
             </TabsTrigger>
-            <TabsTrigger value="privacy" className="gap-2">
+            <TabsTrigger value="privacy" className="gap-2" disabled={mustChangePassword}>
               <Shield className="w-4 h-4" />
               Privacidade
             </TabsTrigger>
-            <TabsTrigger value="support" className="gap-2">
+            <TabsTrigger value="support" className="gap-2" disabled={mustChangePassword}>
               <HelpCircle className="w-4 h-4" />
               Suporte
             </TabsTrigger>
@@ -553,21 +590,35 @@ export function Perfil() {
 
           <TabsContent value="password" className="pt-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <div className="text-sm font-medium text-gray-700">Senha atual</div>
-                <Input
-                  type="password"
-                  value={passwordForm.currentPassword}
-                  onChange={e => setPasswordForm(s => ({ ...s, currentPassword: e.target.value }))}
-                  disabled={bootstrapping || !user}
-                />
-              </div>
+              {!mustChangePassword && (
+                <div className="space-y-1.5">
+                  <div className="text-sm font-medium text-gray-700">Senha atual</div>
+                  <Input
+                    type="password"
+                    autoComplete="current-password"
+                    value={passwordForm.currentPassword}
+                    onChange={e => setPasswordForm(s => ({ ...s, currentPassword: e.target.value }))}
+                    disabled={bootstrapping || !user}
+                  />
+                </div>
+              )}
               <div className="space-y-1.5">
                 <div className="text-sm font-medium text-gray-700">Nova senha</div>
                 <Input
                   type="password"
+                  autoComplete="new-password"
                   value={passwordForm.newPassword}
                   onChange={e => setPasswordForm(s => ({ ...s, newPassword: e.target.value }))}
+                  disabled={bootstrapping || !user}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <div className="text-sm font-medium text-gray-700">Confirmar nova senha</div>
+                <Input
+                  type="password"
+                  autoComplete="new-password"
+                  value={passwordForm.confirmNewPassword}
+                  onChange={e => setPasswordForm(s => ({ ...s, confirmNewPassword: e.target.value }))}
                   disabled={bootstrapping || !user}
                 />
               </div>
@@ -575,7 +626,14 @@ export function Perfil() {
             <div className="mt-6 flex justify-end">
               <Button
                 onClick={handleChangePassword}
-                disabled={bootstrapping || !user || savingPassword || !passwordForm.currentPassword || !passwordForm.newPassword}
+                disabled={
+                  bootstrapping ||
+                  !user ||
+                  savingPassword ||
+                  (!mustChangePassword && !passwordForm.currentPassword) ||
+                  !passwordForm.newPassword ||
+                  !passwordForm.confirmNewPassword
+                }
               >
                 {savingPassword ? 'Atualizando...' : 'Alterar senha'}
               </Button>
