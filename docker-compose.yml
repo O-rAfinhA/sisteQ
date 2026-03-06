@@ -1,0 +1,66 @@
+services:
+  app:
+    image: ${SISTEQ_IMAGE}
+    environment:
+      NODE_ENV: production
+      HOSTNAME: 0.0.0.0
+      PORT: "3000"
+      NEXT_TELEMETRY_DISABLED: "1"
+      SISTEQ_PROFILE_STORE: pg
+      DATABASE_URL: ${DATABASE_URL}
+      PGSSLMODE: ${PGSSLMODE:-require}
+      SISTEQ_SESSION_SECRET: ${SISTEQ_SESSION_SECRET}
+      SISTEQ_JWT_SECRET: ${SISTEQ_JWT_SECRET:-}
+      SISTEQ_SUPER_ADMIN_TOKEN: ${SISTEQ_SUPER_ADMIN_TOKEN:-}
+      SISTEQ_EMAIL_VERIFICATION_MODE: ${SISTEQ_EMAIL_VERIFICATION_MODE:-required}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      SISTEQ_GOOGLE_CLIENT_ID: ${SISTEQ_GOOGLE_CLIENT_ID:-}
+      SISTEQ_GOOGLE_CLIENT_SECRET: ${SISTEQ_GOOGLE_CLIENT_SECRET:-}
+      SISTEQ_GOOGLE_REDIRECT_URI: ${SISTEQ_GOOGLE_REDIRECT_URI:-}
+      SISTEQ_DB_LOGS: ${SISTEQ_DB_LOGS:-0}
+      PGPOOL_MAX: ${PGPOOL_MAX:-}
+      PGPOOL_IDLE_MS: ${PGPOOL_IDLE_MS:-}
+      PGPOOL_CONN_TIMEOUT_MS: ${PGPOOL_CONN_TIMEOUT_MS:-}
+      PG_TX_RETRIES: ${PG_TX_RETRIES:-}
+    networks:
+      - internal
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2.8.4
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      SISTEQ_DOMAIN: ${SISTEQ_DOMAIN}
+      CADDY_EMAIL: ${CADDY_EMAIL}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - internal
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: unless-stopped
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  caddy_data:
+  caddy_config:

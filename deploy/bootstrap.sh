@@ -7,6 +7,11 @@ if ! command -v docker >/dev/null 2>&1; then
   curl -fsSL https://get.docker.com | sh
 fi
 
+if ! docker compose version >/dev/null 2>&1; then
+  sudo apt-get update
+  sudo apt-get install -y docker-compose-plugin
+fi
+
 if ! groups "${USER}" | grep -q docker; then
   sudo usermod -aG docker "${USER}" || true
 fi
@@ -19,6 +24,4 @@ sudo ufw allow 80/tcp || true
 sudo ufw allow 443/tcp || true
 sudo ufw --force enable || true
 
-docker swarm init 2>/dev/null || true
-
-echo "OK: coloque deploy/ e o arquivo .env em ${DEPLOY_PATH} e rode docker stack deploy"
+echo "OK: coloque o repositório e o arquivo .env em ${DEPLOY_PATH} e rode docker compose up -d"
