@@ -910,6 +910,51 @@ export function uninstallTenantFetchShim() {
 
 // ============ ID GENERATION ============
 
+function getCryptoRandomInt(maxExclusive: number): number {
+  const max = Math.floor(maxExclusive);
+  if (!(max > 0)) return 0;
+  const cryptoObj: any = (globalThis as any).crypto;
+  if (cryptoObj && typeof cryptoObj.getRandomValues === 'function') {
+    const arr = new Uint32Array(1);
+    cryptoObj.getRandomValues(arr);
+    return Number(arr[0] % max);
+  }
+  return Math.floor(Math.random() * max);
+}
+
+function shuffleChars(input: string): string {
+  const chars = input.split('');
+  for (let i = chars.length - 1; i > 0; i -= 1) {
+    const j = getCryptoRandomInt(i + 1);
+    const tmp = chars[i];
+    chars[i] = chars[j] as string;
+    chars[j] = tmp as string;
+  }
+  return chars.join('');
+}
+
+export function generateStrongPassword(length = 16): string {
+  const targetLen = Math.max(12, Math.floor(length));
+  const lower = 'abcdefghijklmnopqrstuvwxyz';
+  const upper = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const digits = '0123456789';
+  const symbols = '!@#$%^&*()-_=+[]{};:,.?';
+
+  const required = [
+    lower[getCryptoRandomInt(lower.length)]!,
+    upper[getCryptoRandomInt(upper.length)]!,
+    digits[getCryptoRandomInt(digits.length)]!,
+    symbols[getCryptoRandomInt(symbols.length)]!,
+  ];
+
+  const all = `${lower}${upper}${digits}${symbols}`;
+  let out = required.join('');
+  while (out.length < targetLen) {
+    out += all[getCryptoRandomInt(all.length)]!;
+  }
+  return shuffleChars(out);
+}
+
 /**
  * Gera ID único otimizado
  * @param prefix - Prefixo opcional (ex: 'log-', 'proc-', 'ativ-')
@@ -1123,4 +1168,51 @@ export async function resetApplication(options: ResetApplicationOptions = {}): P
   }
 
   safeCall(() => window.location.replace(redirectTo));
+}
+
+function sanitizeTrackProps(input: Record<string, unknown>) {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(input || {})) {
+    const lk = k.toLowerCase();
+    if (lk.includes('token') || lk.includes('password') || lk.includes('secret')) continue;
+    out[k] = v;
+  }
+  return out;
+}
+
+export function trackEvent(event: string, props: Record<string, unknown> = {}) {
+  if (typeof window === 'undefined') return;
+  const name = String(event || '').trim();
+  if (!name) return;
+  const payload = {
+    event: name,
+    props: sanitizeTrackProps({
+      ...props,
+      path: window.location.pathname,
+      search: window.location.search,
+      referrer: document.referrer || '',
+    }),
+  };
+
+  try {
+    const body = JSON.stringify(payload);
+    const nav: any = (navigator as any);
+    if (nav && typeof nav.sendBeacon === 'function') {
+      const blob = new Blob([body], { type: 'application/json' });
+      nav.sendBeacon('/api/track', blob);
+      return;
+    }
+  } catch {
+  }
+
+  try {
+    fetch('/api/track', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+      keepalive: true as any,
+    }).catch(() => {});
+  } catch {
+  }
 }

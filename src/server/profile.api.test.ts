@@ -265,12 +265,30 @@ describe('Profile API', () => {
       body: { name: 'Usuário', email, password },
     })
     expect(created.status).toBe(201)
+    expect(created.json.emailSent).toBe(true)
     expect(created.json.user.email).toBe(email.toLowerCase())
     expect(created.json.user.role).toBe('User')
+    expect(created.json.user.mustChangePassword).toBe(true)
 
     const logged = await loginAs({ tenantSlug, email, password })
     expect(logged.status).toBe(200)
     expect(logged.cookie).toMatch(/sisteq_access=/)
+
+    const changed = await callProfileApi({
+      method: 'PUT',
+      slug: ['password'],
+      cookie: logged.cookie,
+      body: { newPassword: 'SenhaNova@123456' },
+    })
+    expect(changed.status).toBe(200)
+    expect(changed.json.ok).toBe(true)
+
+    const me = await callProfileApi({ method: 'GET', slug: ['me'], cookie: logged.cookie })
+    expect(me.status).toBe(200)
+    expect(me.json.user.mustChangePassword).toBe(false)
+
+    const loggedWithNew = await loginAs({ tenantSlug, email, password: 'SenhaNova@123456' })
+    expect(loggedWithNew.status).toBe(200)
 
     const forbiddenCreate = await callProfileApi({
       method: 'POST',

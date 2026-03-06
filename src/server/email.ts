@@ -71,3 +71,24 @@ export async function sendVerificationEmail(opts: { to: string; verificationUrl:
   return await sendEmail({ to: opts.to, subject, html, text })
 }
 
+export async function sendWelcomeEmail(opts: {
+  to: string
+  name: string
+  tenantSlug: string
+  loginUrl: string
+  temporaryPassword: string
+}) {
+  const subject = 'Bem-vindo(a)! Seu acesso foi criado'
+  const safeUrl = opts.loginUrl
+  const html = `
+    <div style="font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; line-height: 1.4;">
+      <h2 style="margin: 0 0 12px;">Bem-vindo(a), ${opts.name}</h2>
+      <p style="margin: 0 0 12px;">Seu acesso ao sistema foi criado para a organização <strong>${opts.tenantSlug}</strong>.</p>
+      <p style="margin: 0 0 12px;">Senha temporária: <strong>${opts.temporaryPassword}</strong></p>
+      <p style="margin: 0 0 12px;"><a href="${safeUrl}">Acessar página de login</a></p>
+      <p style="margin: 0; color: #555;">No primeiro login, você será solicitado(a) a trocar a senha.</p>
+    </div>
+  `.trim()
+  const text = `Bem-vindo(a), ${opts.name}\nOrganização: ${opts.tenantSlug}\nSenha temporária: ${opts.temporaryPassword}\nLogin: ${safeUrl}\nNo primeiro login, você será solicitado(a) a trocar a senha.`
+  return await sendEmail({ to: opts.to, subject, html, text })
+}

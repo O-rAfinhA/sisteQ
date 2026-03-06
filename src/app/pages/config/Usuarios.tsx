@@ -1,10 +1,10 @@
-import { UserCog, Plus, Edit2, Trash2, UserCheck, UserX, Shield } from 'lucide-react';
+import { UserCog, Plus, Edit2, Trash2, UserCheck, UserX, Shield, Eye, EyeOff, Copy } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { ConfigInfo } from '../../components/ConfigInfo';
 import { Badge } from '../../components/ui/badge';
 import { MetricCard } from '../../components/ui/metric-card';
 import { Button } from '../../components/ui/button';
-import { generateId, getFromStorage } from '../../utils/helpers';
+import { generateId, generateStrongPassword, getFromStorage } from '../../utils/helpers';
 import { formatarDataHoje } from '../../utils/formatters';
 import { useLocalStorage } from '../../hooks';
 
@@ -20,6 +20,34 @@ export interface Usuario {
   dataCadastro: string;
 }
 
+async function apiJson<T>(url: string, init: RequestInit) {
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(init.headers ?? {}),
+    },
+    credentials: 'same-origin',
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(data?.error || `Erro HTTP ${res.status}`);
+  return data as T;
+}
+
+function passwordScore(pw: string) {
+  const len = pw.length;
+  const hasLower = /[a-z]/.test(pw);
+  const hasUpper = /[A-Z]/.test(pw);
+  const hasDigit = /[0-9]/.test(pw);
+  const hasSymbol = /[^A-Za-z0-9]/.test(pw);
+  const classes = [hasLower, hasUpper, hasDigit, hasSymbol].filter(Boolean).length;
+  let score = 0;
+  if (len >= 12) score += 2;
+  else if (len >= 10) score += 1;
+  score += classes;
+  return { score, classes, len, hasLower, hasUpper, hasDigit, hasSymbol };
+}
+
 export function Usuarios() {
   const [usuarios, setUsuarios] = useLocalStorage<Usuario[]>('usuarios', []);
   const [departamentos, setDepartamentos] = useState<string[]>([]);
@@ -27,6 +55,8 @@ export function Usuarios() {
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [filtroTipo, setFiltroTipo] = useState<'todos' | 'sistema' | 'pessoa'>('todos');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [formData, setFormData] = useState<Omit<Usuario, 'id' | 'dataCadastro'>>({
     nome: '',
     email: '',
@@ -48,9 +78,48 @@ export function Usuarios() {
     setFuncoes(funcs.filter((f: any) => f.ativo).map((f: any) => f.nome));
   }, []);
 
-  const handleAdd = () => {
+  const handleAdd = async () => {
     if (!formData.nome || !formData.email) {
       alert('Por favor, preencha pelo menos Nome e E-mail');
+      return;
+    }
+
+    if (formData.tipo === 'sistema') {
+      if (!password) {
+        alert('Gere uma senha para o novo usuário do sistema');
+        return;
+      }
+      if (
+        !confirm(
+          `Criar usuário do sistema para ${formData.nome} (${formData.email})?\n\nO usuário será obrigado a trocar a senha no primeiro login.`,
+        )
+      ) {
+        return;
+      }
+      try {
+        const { user } = await apiJson<{ user: { id: string } }>('/api/profile/users', {
+          method: 'POST',
+          body: JSON.stringify({ name: formData.nome, email: formData.email, password }),
+        });
+
+        try {
+          if (navigator?.clipboard?.writeText) await navigator.clipboard.writeText(password);
+        } catch {
+        }
+
+        const newUsuario: Usuario = {
+          id: user.id || generateId(),
+          ...formData,
+          dataCadastro: formatarDataHoje(),
+        };
+        const updated = [...usuarios, newUsuario];
+        setUsuarios(updated);
+        alert('Usuário criado. A senha temporária foi copiada para a área de transferência.');
+        resetForm();
+        setIsAdding(false);
+      } catch (e: any) {
+        alert(e?.message || 'Não foi possível criar o usuário');
+      }
       return;
     }
 
@@ -112,6 +181,8 @@ export function Usuarios() {
       perfil: 'restrito',
       ativo: true
     });
+    setPassword('');
+    setShowPassword(false);
   };
 
   const handleCancel = () => {
@@ -128,6 +199,7 @@ export function Usuarios() {
   const totalSistema = usuarios.filter(u => u.tipo === 'sistema').length;
   const totalPessoas = usuarios.filter(u => u.tipo === 'pessoa').length;
   const totalMaster = usuarios.filter(u => u.tipo === 'sistema' && u.perfil === 'master').length;
+  const isManagingRecord = isAdding || Boolean(editingId);
 
   return (
     <div className="p-8 max-w-[1400px] mx-auto space-y-8">
@@ -138,13 +210,15 @@ export function Usuarios() {
               <UserCog className="w-8 h-8 text-blue-600" />
               <h1 className="text-gray-900 tracking-tight" style={{ fontSize: '1.75rem', fontWeight: 600, lineHeight: 1.3 }}>Usuários e Pessoas</h1>
             </div>
-            <Button
-              onClick={() => setIsAdding(true)}
-              className="flex items-center gap-2 bg-blue-600 text-white hover:bg-blue-700"
-            >
-              <Plus className="w-4 h-4" />
-              Novo Cadastro
-            </Button>
+            {!isManagingRecord && (
+              <Button
+                onClick={() => setIsAdding(true)}
+                className="flex items-center gap-2 bg-blue-600 text-white hover:bg-blue-700"
+              >
+                <Plus className="w-4 h-4" />
+                Novo Cadastro
+              </Button>
+            )}
           </div>
         </div>
 
@@ -306,6 +380,85 @@ export function Usuarios() {
                 </div>
               )}
 
+              {formData.tipo === 'sistema' && !editingId && (
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Senha temporária *
+                  </label>
+                  <div className="flex flex-col gap-2">
+                    <div className="flex gap-2">
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        className="flex-1 px-3 py-2 border border-gray-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+                        placeholder="Clique em “Gerar senha”"
+                        autoComplete="new-password"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => setShowPassword(v => !v)}
+                        title={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
+                      >
+                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={async () => {
+                          try {
+                            if (navigator?.clipboard?.writeText) await navigator.clipboard.writeText(password);
+                          } catch {
+                          }
+                        }}
+                        disabled={!password}
+                        title="Copiar senha"
+                      >
+                        <Copy className="w-4 h-4" />
+                      </Button>
+                      <Button
+                        type="button"
+                        className="bg-blue-600 text-white hover:bg-blue-700"
+                        onClick={() => {
+                          const nextPw = generateStrongPassword(16);
+                          setPassword(nextPw);
+                          setShowPassword(true);
+                        }}
+                      >
+                        Gerar senha
+                      </Button>
+                    </div>
+
+                    {(() => {
+                      const s = passwordScore(password);
+                      const strong = s.len >= 12 && s.classes >= 4;
+                      const label =
+                        !password
+                          ? 'Gere uma senha para continuar'
+                          : strong
+                            ? 'Forte'
+                            : s.len >= 10 && s.classes >= 3
+                              ? 'Média'
+                              : 'Fraca';
+                      const color =
+                        !password
+                          ? 'text-gray-600'
+                          : strong
+                            ? 'text-green-700'
+                            : s.len >= 10 && s.classes >= 3
+                              ? 'text-orange-700'
+                              : 'text-red-700';
+                      return (
+                        <div className={`text-sm ${color}`}>
+                          Força: {label}. Requisitos: 12+ caracteres, maiúscula, minúscula, número e especial.
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+              )}
+
               <div className="flex items-center gap-2">
                 <input
                   type="checkbox"
@@ -348,13 +501,15 @@ export function Usuarios() {
               <p className="text-gray-600 mb-4">
                 Comece adicionando um novo usuário ou pessoa
               </p>
-              <button
-                onClick={() => setIsAdding(true)}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                <Plus className="w-4 h-4" />
-                Novo Cadastro
-              </button>
+              {!isManagingRecord && (
+                <button
+                  onClick={() => setIsAdding(true)}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                  <Plus className="w-4 h-4" />
+                  Novo Cadastro
+                </button>
+              )}
             </div>
           ) : (
             <div className="overflow-x-auto">

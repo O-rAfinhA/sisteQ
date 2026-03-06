@@ -4,6 +4,7 @@ import {
   changePassword,
   createUserAsAdmin,
   createSupportTicket,
+  getTenantById,
   getMe,
   getNotificationSettings,
   getPreferences,
@@ -22,6 +23,7 @@ import {
   updatePreferences,
   updatePrivacy,
 } from '@/server/profile'
+import { sendWelcomeEmail } from '@/server/email'
 import {
   deleteTenantKvValue,
   deleteTenantKvValues,
@@ -50,6 +52,22 @@ function getSlug(req: NextApiRequest) {
   if (!raw) return []
   if (Array.isArray(raw)) return raw
   return [raw]
+}
+
+function getProto(req: NextApiRequest) {
+  const xfProto = req.headers['x-forwarded-proto']
+  const protoRaw = Array.isArray(xfProto) ? xfProto[0] : xfProto
+  const proto = typeof protoRaw === 'string' ? protoRaw.split(',')[0]?.trim().toLowerCase() : ''
+  if (proto === 'http' || proto === 'https') return proto
+  return process.env.NODE_ENV === 'production' ? 'https' : 'http'
+}
+
+function baseUrlFromRequest(req: NextApiRequest) {
+  const hostRaw = req.headers.host
+  const host = Array.isArray(hostRaw) ? hostRaw[0] : hostRaw
+  const safeHost = typeof host === 'string' ? host.trim() : ''
+  if (!safeHost) return ''
+  return `${getProto(req)}://${safeHost}`
 }
 
 function sendError(res: NextApiResponse, e: any) {
@@ -252,7 +270,34 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return
       }
       if (req.method === 'POST') {
-        res.status(201).json({ user: await createUserAsAdmin(auth.tenantId, auth.userId, req.body ?? {}) })
+        const body = (req.body ?? {}) as any
+        const temporaryPassword = typeof body?.password === 'string' ? body.password : ''
+
+        const user = await createUserAsAdmin(auth.tenantId, auth.userId, body)
+
+        let emailSent: boolean | undefined = undefined
+        if (temporaryPassword) {
+          try {
+            const tenant = await getTenantById(auth.tenantId)
+            const tenantSlug = tenant?.slug ? String(tenant.slug) : auth.tenantId
+            const baseUrl = baseUrlFromRequest(req)
+            const loginUrl = baseUrl
+              ? `${baseUrl}/login?tenant=${encodeURIComponent(tenantSlug)}`
+              : `/login?tenant=${encodeURIComponent(tenantSlug)}`
+            await sendWelcomeEmail({
+              to: user.email,
+              name: user.name,
+              tenantSlug,
+              loginUrl,
+              temporaryPassword,
+            })
+            emailSent = true
+          } catch {
+            emailSent = false
+          }
+        }
+
+        res.status(201).json({ user, emailSent })
         return
       }
       res.setHeader('Allow', 'GET, POST')
