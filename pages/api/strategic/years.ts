@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
-import { AuthError, requireAuthFromRequest } from '@/server/profile'
+import { AuthError, assertRbacAccess, requireAuthFromRequest } from '@/server/profile'
 import { getStrategicYears, saveStrategicYears } from '@/server/strategic'
 
 function accessLog(event: string, fields: Record<string, unknown>) {
@@ -23,12 +23,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     })
 
     if (req.method === 'GET') {
+      await assertRbacAccess(auth.tenantId, auth.userId, 'gestao-estrategica', 'ver')
       const data = await getStrategicYears(auth.tenantId)
       res.status(200).json({ data })
       return
     }
 
     if (req.method === 'PUT') {
+      await assertRbacAccess(auth.tenantId, auth.userId, 'gestao-estrategica', 'editar')
       const result = await saveStrategicYears(auth.tenantId, auth.userId, req.body ?? {})
       res.status(200).json(result)
       return

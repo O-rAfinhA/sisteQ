@@ -1,4 +1,4 @@
-import { useLocation, useParams } from 'react-router';
+import { useLocation, useNavigate, useParams } from 'react-router';
 import { useEffect, useState, useMemo, type ReactNode } from 'react';
 import { FileDown } from 'lucide-react';
 import { StrategicProvider } from '../context/StrategicContext';
@@ -10,12 +10,17 @@ import { ModularSidebar } from './ModularSidebar';
 import { modules, Module, getModuleByPath } from '../config/modules';
 import { useFornecedores } from '../hooks/useFornecedores';
 import {
+  canAccessModule,
   getTenantIdFromSession,
+  setActiveModuleIdToSession,
   installTenantFetchShim,
   installTenantLocalStorageShim,
   setTenantIdToSession,
+  setUserIdToSession,
+  setUserRoleToSession,
   waitForTenantKvHydration,
 } from '../utils/helpers';
+import { toast } from 'sonner';
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   const params = useParams<{ companyId?: string }>();
@@ -60,8 +65,12 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = (await res.json()) as any;
         const tenantId = String(data?.user?.tenant?.id ?? data?.tenant?.id ?? data?.tenantId ?? data?.user?.tenantId ?? '').trim();
+        const userId = String(data?.user?.id ?? '').trim();
+        const role = typeof data?.user?.role === 'string' ? data.user.role : null;
         if (!tenantId) throw new Error('Missing tenantId');
         setTenantIdToSession(tenantId);
+        setUserIdToSession(userId || null);
+        setUserRoleToSession(role);
         installTenantLocalStorageShim(tenantId);
         installTenantFetchShim(tenantId);
         setKvReady(false);
@@ -143,9 +152,11 @@ export default function RootLayout({ children }: { children: ReactNode }) {
 
 function InnerRootLayout({ children }: { children: ReactNode }) {
   const location = useLocation();
+  const navigate = useNavigate();
   const [activeModule, setActiveModule] = useState<Module | undefined>(getModuleByPath(location.pathname) || modules[0]);
   const [pdfDialogOpen, setPdfDialogOpen] = useState(false);
   const { configuracao } = useFornecedores();
+  const [rbacTick, setRbacTick] = useState(0);
 
   useEffect(() => {
     const moduleInfo = getModuleByPath(location.pathname);
@@ -153,6 +164,49 @@ function InnerRootLayout({ children }: { children: ReactNode }) {
       setActiveModule(moduleInfo);
     }
   }, [location.pathname]);
+
+  useEffect(() => {
+    const moduleInfo = getModuleByPath(location.pathname);
+    if (!moduleInfo) return;
+    setActiveModuleIdToSession(moduleInfo.id);
+
+    if (moduleInfo.id === 'configuracoes') return;
+    const allowed = canAccessModule(moduleInfo.id as any, 'ver');
+    if (allowed) {
+      return;
+    }
+
+    const actionLabel = 'ver';
+    toast.error(`Sem permissão para ${actionLabel} o módulo "${moduleInfo.label}".`);
+
+    const firstAllowed = modules.find(m => m.id !== 'configuracoes' && canAccessModule(m.id as any, 'ver'));
+    navigate(firstAllowed?.defaultPath || '/perfil', { replace: true });
+  }, [location.pathname, navigate, rbacTick]);
+
+  useEffect(() => {
+    const onDenied = (evt: Event) => {
+      const d = (evt as any)?.detail ?? {};
+      const moduleId = String(d?.moduleId ?? '').trim();
+      const action = String(d?.action ?? '').trim();
+      const mod = modules.find(m => m.id === moduleId);
+      const label = mod?.label || moduleId || 'módulo';
+      const a = action || 'executar';
+      toast.error(`Sem permissão para ${a} em "${label}".`);
+    };
+    const onChanged = () => setRbacTick(v => v + 1);
+    try {
+      window.addEventListener('sisteq:rbac-denied', onDenied as any);
+      window.addEventListener('sisteq:rbac-changed', onChanged as any);
+    } catch {
+    }
+    return () => {
+      try {
+        window.removeEventListener('sisteq:rbac-denied', onDenied as any);
+        window.removeEventListener('sisteq:rbac-changed', onChanged as any);
+      } catch {
+      }
+    };
+  }, []);
 
   const filteredModule = useMemo(() => {
     if (!activeModule) return undefined;

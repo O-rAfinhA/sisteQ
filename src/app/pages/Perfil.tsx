@@ -18,7 +18,7 @@ import {
   AlertDialogTitle,
 } from '../components/ui/alert-dialog'
 import { toast } from 'sonner'
-import { formatRoleWithOrganization, resetApplication } from '../utils/helpers'
+import { formatRoleWithOrganization, isAdminRole, resetApplication } from '../utils/helpers'
 
 type ProfilePreferences = {
   theme: 'system' | 'light' | 'dark'
@@ -148,6 +148,7 @@ export function Perfil() {
   const [user, setUser] = useState<PublicUser | null>(null)
 
   const mustChangePassword = Boolean(user?.mustChangePassword)
+  const isAdmin = isAdminRole(user?.role)
 
   const [savingProfile, setSavingProfile] = useState(false)
   const [savingPassword, setSavingPassword] = useState(false)
@@ -230,13 +231,18 @@ export function Perfil() {
         setPreferencesForm(data.user.preferences)
         setNotificationsSettingsForm(data.user.notificationSettings)
         setPrivacyForm(data.user.privacy)
-        const ntf = await apiJson<{ unreadCount: number; items: ProfileNotification[] }>(
-          '/api/profile/notifications',
-          { method: 'GET' },
-        )
-        if (cancelled) return
-        setNotifications(ntf.items)
-        setUnreadCount(ntf.unreadCount)
+        if (isAdminRole(data.user.role)) {
+          const ntf = await apiJson<{ unreadCount: number; items: ProfileNotification[] }>(
+            '/api/profile/notifications',
+            { method: 'GET' },
+          )
+          if (cancelled) return
+          setNotifications(ntf.items)
+          setUnreadCount(ntf.unreadCount)
+        } else {
+          setNotifications([])
+          setUnreadCount(0)
+        }
       } catch (e: any) {
         if (!cancelled) toast.error(e?.message || 'Falha ao carregar perfil')
       } finally {
@@ -252,9 +258,13 @@ export function Perfil() {
   useEffect(() => {
     if (!user) return
     let cancelled = false
+    const restrictedTabs = new Set(['preferences', 'notifications', 'privacy'])
 
     async function loadTabData() {
       try {
+        if (!isAdmin && restrictedTabs.has(tab)) {
+          throw Object.assign(new Error('Acesso restrito ao Administrador'), { status: 403 })
+        }
         if (tab === 'activity' && activity === null) {
           const data = await apiJson<{ activity: ProfileActivityEvent[] }>('/api/profile/activity?limit=50')
           if (!cancelled) setActivity(data.activity)
@@ -271,7 +281,10 @@ export function Perfil() {
           }
         }
       } catch (e: any) {
-        if (!cancelled) toast.error(e?.message || 'Falha ao carregar dados')
+        if (!cancelled) {
+          if (e?.status === 403) setTab('profile')
+          toast.error(e?.message || 'Falha ao carregar dados')
+        }
       }
     }
 
@@ -279,7 +292,13 @@ export function Perfil() {
     return () => {
       cancelled = true
     }
-  }, [tab, user, activity, tickets, notifications])
+  }, [tab, user, activity, tickets, notifications, isAdmin])
+
+  useEffect(() => {
+    if (!user) return
+    const restrictedTabs = new Set(['preferences', 'notifications', 'privacy'])
+    if (restrictedTabs.has(tab) && !isAdmin) setTab('profile')
+  }, [isAdmin, tab, user])
 
   useEffect(() => {
     if (!mustChangePassword) return
@@ -353,6 +372,7 @@ export function Perfil() {
       toast.success('Preferências salvas')
       setActivity(null)
     } catch (e: any) {
+      if (e?.status === 403) setTab('profile')
       toast.error(e?.message || 'Não foi possível salvar preferências')
     } finally {
       setSavingPreferences(false)
@@ -370,6 +390,7 @@ export function Perfil() {
       toast.success('Notificações atualizadas')
       setActivity(null)
     } catch (e: any) {
+      if (e?.status === 403) setTab('profile')
       toast.error(e?.message || 'Não foi possível atualizar notificações')
     } finally {
       setSavingNotificationsSettings(false)
@@ -385,6 +406,7 @@ export function Perfil() {
       setUnreadCount(data.unreadCount)
       setNotifications(prev => (prev ? prev.map(n => (n.id === id ? { ...n, readAt: n.readAt || new Date().toISOString() } : n)) : prev))
     } catch (e: any) {
+      if (e?.status === 403) setTab('profile')
       toast.error(e?.message || 'Não foi possível marcar como lida')
     }
   }
@@ -401,6 +423,7 @@ export function Perfil() {
       setActivity(null)
       if (!data.privacy.showActivity) setActivity([])
     } catch (e: any) {
+      if (e?.status === 403) setTab('profile')
       toast.error(e?.message || 'Não foi possível atualizar privacidade')
     } finally {
       setSavingPrivacy(false)
@@ -512,22 +535,28 @@ export function Perfil() {
               <Lock className="w-4 h-4" />
               Senha
             </TabsTrigger>
-            <TabsTrigger value="preferences" className="gap-2" disabled={mustChangePassword}>
-              <SlidersHorizontal className="w-4 h-4" />
-              Preferências
-            </TabsTrigger>
-            <TabsTrigger value="notifications" className="gap-2" disabled={mustChangePassword}>
-              <Bell className="w-4 h-4" />
-              Notificações{unreadCount > 0 ? ` (${unreadCount})` : ''}
-            </TabsTrigger>
+            {isAdmin && (
+              <TabsTrigger value="preferences" className="gap-2" disabled={mustChangePassword}>
+                <SlidersHorizontal className="w-4 h-4" />
+                Preferências
+              </TabsTrigger>
+            )}
+            {isAdmin && (
+              <TabsTrigger value="notifications" className="gap-2" disabled={mustChangePassword}>
+                <Bell className="w-4 h-4" />
+                Notificações{unreadCount > 0 ? ` (${unreadCount})` : ''}
+              </TabsTrigger>
+            )}
             <TabsTrigger value="activity" className="gap-2" disabled={mustChangePassword}>
               <History className="w-4 h-4" />
               Atividades
             </TabsTrigger>
-            <TabsTrigger value="privacy" className="gap-2" disabled={mustChangePassword}>
-              <Shield className="w-4 h-4" />
-              Privacidade
-            </TabsTrigger>
+            {isAdmin && (
+              <TabsTrigger value="privacy" className="gap-2" disabled={mustChangePassword}>
+                <Shield className="w-4 h-4" />
+                Privacidade
+              </TabsTrigger>
+            )}
             <TabsTrigger value="support" className="gap-2" disabled={mustChangePassword}>
               <HelpCircle className="w-4 h-4" />
               Suporte
@@ -647,129 +676,132 @@ export function Perfil() {
             </div>
           </TabsContent>
 
-          <TabsContent value="preferences" className="pt-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <div className="text-sm font-medium text-gray-700">Tema</div>
-                <Select
-                  value={preferencesForm.theme}
-                  onValueChange={(v: ProfilePreferences['theme']) => setPreferencesForm(s => ({ ...s, theme: v }))}
-                  disabled={bootstrapping || !user}
-                >
-                  <SelectTrigger className="h-9">
-                    <SelectValue placeholder="Selecione" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="system">Sistema</SelectItem>
-                    <SelectItem value="light">Claro</SelectItem>
-                    <SelectItem value="dark">Escuro</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <div className="text-sm font-medium text-gray-700">Idioma</div>
-                <Select
-                  value={preferencesForm.language}
-                  onValueChange={(v: ProfilePreferences['language']) => setPreferencesForm(s => ({ ...s, language: v }))}
-                  disabled={bootstrapping || !user}
-                >
-                  <SelectTrigger className="h-9">
-                    <SelectValue placeholder="Selecione" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="pt-BR">Português (Brasil)</SelectItem>
-                    <SelectItem value="en-US">English (US)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="flex items-center justify-between rounded-lg border border-gray-200 p-4">
-                <div>
-                  <div className="text-sm font-medium text-gray-800">Modo compacto</div>
-                  <div className="text-xs text-gray-500">Reduz espaçamentos em algumas telas.</div>
+          {isAdmin && (
+            <TabsContent value="preferences" className="pt-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <div className="text-sm font-medium text-gray-700">Tema</div>
+                  <Select
+                    value={preferencesForm.theme}
+                    onValueChange={(v: ProfilePreferences['theme']) => setPreferencesForm(s => ({ ...s, theme: v }))}
+                    disabled={bootstrapping || !user}
+                  >
+                    <SelectTrigger className="h-9">
+                      <SelectValue placeholder="Selecione" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="system">Sistema</SelectItem>
+                      <SelectItem value="light">Claro</SelectItem>
+                      <SelectItem value="dark">Escuro</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
-                <Switch
-                  checked={preferencesForm.compactMode}
-                  onCheckedChange={checked => setPreferencesForm(s => ({ ...s, compactMode: checked }))}
-                  disabled={bootstrapping || !user}
-                />
-              </div>
-
-              <div className="flex items-center justify-between rounded-lg border border-gray-200 p-4">
-                <div>
-                  <div className="text-sm font-medium text-gray-800">Analytics</div>
-                  <div className="text-xs text-gray-500">Permite coleta de dados de uso.</div>
+                <div className="space-y-1.5">
+                  <div className="text-sm font-medium text-gray-700">Idioma</div>
+                  <Select
+                    value={preferencesForm.language}
+                    onValueChange={(v: ProfilePreferences['language']) => setPreferencesForm(s => ({ ...s, language: v }))}
+                    disabled={bootstrapping || !user}
+                  >
+                    <SelectTrigger className="h-9">
+                      <SelectValue placeholder="Selecione" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="pt-BR">Português (Brasil)</SelectItem>
+                      <SelectItem value="en-US">English (US)</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
-                <Switch
-                  checked={preferencesForm.analyticsOptIn}
-                  onCheckedChange={checked => setPreferencesForm(s => ({ ...s, analyticsOptIn: checked }))}
-                  disabled={bootstrapping || !user}
-                />
-              </div>
-            </div>
 
-            <div className="mt-6 flex justify-end">
-              <Button onClick={handleSavePreferences} disabled={bootstrapping || !user || savingPreferences}>
-                {savingPreferences ? 'Salvando...' : 'Salvar preferências'}
-              </Button>
-            </div>
-
-            <div className="mt-8 rounded-xl border border-red-200 bg-red-50/40 p-5">
-              <div className="flex items-start gap-3">
-                <div className="mt-0.5 h-9 w-9 rounded-lg bg-red-100 flex items-center justify-center">
-                  <AlertTriangle className="h-5 w-5 text-red-700" />
-                </div>
-                <div className="flex-1">
-                  <div className="text-sm font-semibold text-red-900">Reset da aplicação</div>
-                  <div className="mt-1 text-xs text-red-700 leading-relaxed">
-                    Remove todos os dados locais preenchidos no navegador (localStorage, sessionStorage, IndexedDB e caches),
-                    reinicializa serviços ativos e retorna o sistema ao estado inicial. Esta ação é irreversível.
+                <div className="flex items-center justify-between rounded-lg border border-gray-200 p-4">
+                  <div>
+                    <div className="text-sm font-medium text-gray-800">Modo compacto</div>
+                    <div className="text-xs text-gray-500">Reduz espaçamentos em algumas telas.</div>
                   </div>
+                  <Switch
+                    checked={preferencesForm.compactMode}
+                    onCheckedChange={checked => setPreferencesForm(s => ({ ...s, compactMode: checked }))}
+                    disabled={bootstrapping || !user}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between rounded-lg border border-gray-200 p-4">
+                  <div>
+                    <div className="text-sm font-medium text-gray-800">Analytics</div>
+                    <div className="text-xs text-gray-500">Permite coleta de dados de uso.</div>
+                  </div>
+                  <Switch
+                    checked={preferencesForm.analyticsOptIn}
+                    onCheckedChange={checked => setPreferencesForm(s => ({ ...s, analyticsOptIn: checked }))}
+                    disabled={bootstrapping || !user}
+                  />
                 </div>
               </div>
-              <div className="mt-4 flex justify-end">
-                <Button
-                  variant="destructive"
-                  onClick={() => setResetOpen(true)}
-                  disabled={bootstrapping || resetting}
-                >
-                  Resetar aplicação
+
+              <div className="mt-6 flex justify-end">
+                <Button onClick={handleSavePreferences} disabled={bootstrapping || !user || savingPreferences}>
+                  {savingPreferences ? 'Salvando...' : 'Salvar preferências'}
                 </Button>
               </div>
-            </div>
 
-            <AlertDialog open={resetOpen} onOpenChange={v => { if (!resetting) setResetOpen(v) }}>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Confirmar reset completo</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    Você está prestes a apagar permanentemente todos os dados locais desta instalação (incluindo formulários salvos,
-                    cadastros locais, caches e bancos do navegador). Após confirmar, não será possível desfazer.
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel disabled={resetting}>Cancelar</AlertDialogCancel>
-                  <AlertDialogAction
-                    className="bg-red-600 hover:bg-red-700"
-                    disabled={resetting}
-                    onClick={async () => {
-                      setResetting(true)
-                      toast.message('Resetando aplicação...')
-                      try {
-                        await resetApplication({ redirectTo: '/login?reset=1' })
-                      } catch (e: any) {
-                        setResetting(false)
-                        toast.error(e?.message || 'Falha ao resetar aplicação')
-                      }
-                    }}
+              <div className="mt-8 rounded-xl border border-red-200 bg-red-50/40 p-5">
+                <div className="flex items-start gap-3">
+                  <div className="mt-0.5 h-9 w-9 rounded-lg bg-red-100 flex items-center justify-center">
+                    <AlertTriangle className="h-5 w-5 text-red-700" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-sm font-semibold text-red-900">Reset da aplicação</div>
+                    <div className="mt-1 text-xs text-red-700 leading-relaxed">
+                      Remove todos os dados locais preenchidos no navegador (localStorage, sessionStorage, IndexedDB e caches),
+                      reinicializa serviços ativos e retorna o sistema ao estado inicial. Esta ação é irreversível.
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-4 flex justify-end">
+                  <Button
+                    variant="destructive"
+                    onClick={() => setResetOpen(true)}
+                    disabled={bootstrapping || resetting}
                   >
-                    {resetting ? 'Resetando...' : 'Confirmar e resetar'}
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-          </TabsContent>
+                    Resetar aplicação
+                  </Button>
+                </div>
+              </div>
 
+              <AlertDialog open={resetOpen} onOpenChange={v => { if (!resetting) setResetOpen(v) }}>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Confirmar reset completo</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Você está prestes a apagar permanentemente todos os dados locais desta instalação (incluindo formulários salvos,
+                      cadastros locais, caches e bancos do navegador). Após confirmar, não será possível desfazer.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel disabled={resetting}>Cancelar</AlertDialogCancel>
+                    <AlertDialogAction
+                      className="bg-red-600 hover:bg-red-700"
+                      disabled={resetting}
+                      onClick={async () => {
+                        setResetting(true)
+                        toast.message('Resetando aplicação...')
+                        try {
+                          await resetApplication({ redirectTo: '/login?reset=1' })
+                        } catch (e: any) {
+                          setResetting(false)
+                          toast.error(e?.message || 'Falha ao resetar aplicação')
+                        }
+                      }}
+                    >
+                      {resetting ? 'Resetando...' : 'Confirmar e resetar'}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </TabsContent>
+          )}
+
+          {isAdmin && (
           <TabsContent value="notifications" className="pt-6 space-y-6">
             <div className="rounded-xl border border-gray-200 p-5">
               <div className="text-sm font-semibold text-gray-900">Configurações</div>
@@ -846,6 +878,7 @@ export function Perfil() {
               </div>
             </div>
           </TabsContent>
+          )}
 
           <TabsContent value="activity" className="pt-6">
             <div className="rounded-xl border border-gray-200 overflow-hidden">
@@ -870,38 +903,40 @@ export function Perfil() {
             </div>
           </TabsContent>
 
-          <TabsContent value="privacy" className="pt-6">
-            <div className="grid grid-cols-1 gap-4">
-              <div className="flex items-center justify-between rounded-xl border border-gray-200 p-5">
-                <div>
-                  <div className="text-sm font-semibold text-gray-900">Exibir e-mail</div>
-                  <div className="text-xs text-gray-500">Controla se o e-mail fica visível nas telas do sistema.</div>
+          {isAdmin && (
+            <TabsContent value="privacy" className="pt-6">
+              <div className="grid grid-cols-1 gap-4">
+                <div className="flex items-center justify-between rounded-xl border border-gray-200 p-5">
+                  <div>
+                    <div className="text-sm font-semibold text-gray-900">Exibir e-mail</div>
+                    <div className="text-xs text-gray-500">Controla se o e-mail fica visível nas telas do sistema.</div>
+                  </div>
+                  <Switch
+                    checked={privacyForm.showEmail}
+                    onCheckedChange={checked => setPrivacyForm(s => ({ ...s, showEmail: checked }))}
+                    disabled={bootstrapping || !user}
+                  />
                 </div>
-                <Switch
-                  checked={privacyForm.showEmail}
-                  onCheckedChange={checked => setPrivacyForm(s => ({ ...s, showEmail: checked }))}
-                  disabled={bootstrapping || !user}
-                />
-              </div>
-              <div className="flex items-center justify-between rounded-xl border border-gray-200 p-5">
-                <div>
-                  <div className="text-sm font-semibold text-gray-900">Registrar e exibir atividades</div>
-                  <div className="text-xs text-gray-500">Ativa o histórico de ações no seu perfil.</div>
+                <div className="flex items-center justify-between rounded-xl border border-gray-200 p-5">
+                  <div>
+                    <div className="text-sm font-semibold text-gray-900">Registrar e exibir atividades</div>
+                    <div className="text-xs text-gray-500">Ativa o histórico de ações no seu perfil.</div>
+                  </div>
+                  <Switch
+                    checked={privacyForm.showActivity}
+                    onCheckedChange={checked => setPrivacyForm(s => ({ ...s, showActivity: checked }))}
+                    disabled={bootstrapping || !user}
+                  />
                 </div>
-                <Switch
-                  checked={privacyForm.showActivity}
-                  onCheckedChange={checked => setPrivacyForm(s => ({ ...s, showActivity: checked }))}
-                  disabled={bootstrapping || !user}
-                />
               </div>
-            </div>
 
-            <div className="mt-6 flex justify-end">
-              <Button onClick={handleSavePrivacy} disabled={bootstrapping || !user || savingPrivacy}>
-                {savingPrivacy ? 'Salvando...' : 'Salvar privacidade'}
-              </Button>
-            </div>
-          </TabsContent>
+              <div className="mt-6 flex justify-end">
+                <Button onClick={handleSavePrivacy} disabled={bootstrapping || !user || savingPrivacy}>
+                  {savingPrivacy ? 'Salvando...' : 'Salvar privacidade'}
+                </Button>
+              </div>
+            </TabsContent>
+          )}
 
           <TabsContent value="support" className="pt-6 space-y-6">
             <div className="rounded-xl border border-gray-200 p-5">

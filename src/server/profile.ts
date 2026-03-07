@@ -5,6 +5,7 @@ import { TextEncoder } from 'util'
 import bcrypt from 'bcryptjs'
 import { SignJWT, jwtVerify } from 'jose'
 import { isDatabaseConfigured, prisma } from '@/server/prisma'
+import { getTenantKvValue } from '@/server/tenant-kv'
 
 export type ProfilePreferences = {
   theme: 'system' | 'light' | 'dark'
@@ -700,11 +701,83 @@ async function getUserById(tenantId: string, userId: string) {
   return user
 }
 
-async function assertAdmin(tenantId: string, userId: string) {
+export async function assertAdmin(tenantId: string, userId: string) {
   const user = await getUserById(tenantId, userId)
   if (user.disabledAt) throw new ForbiddenError('Usuário desativado')
   if (user.role !== ROLE_ADMIN) throw new ForbiddenError('Acesso restrito ao Administrador')
   return user
+}
+
+export type RbacAction = 'ver' | 'criar' | 'editar' | 'excluir'
+
+function parseMaybeJson(value: any) {
+  if (typeof value !== 'string') return value
+  const raw = value.trim()
+  if (!raw) return null
+  try {
+    return JSON.parse(raw)
+  } catch {
+    return null
+  }
+}
+
+function toArray(value: any) {
+  const parsed = parseMaybeJson(value)
+  return Array.isArray(parsed) ? parsed : Array.isArray(value) ? value : []
+}
+
+async function getUserFuncaoIdFromTenantKv(tenantId: string, userId: string) {
+  const usuarios = toArray(await getTenantKvValue(tenantId, 'usuarios'))
+  const me = usuarios.find((u: any) => String(u?.id ?? '').trim() === String(userId).trim())
+  const funcaoNome = String(me?.funcao ?? '').trim()
+  if (!funcaoNome) return null
+
+  const funcoes = toArray(await getTenantKvValue(tenantId, 'funcoes'))
+  const funcao = funcoes.find((f: any) => String(f?.nome ?? '').trim() === funcaoNome)
+  const funcaoId = String(funcao?.id ?? '').trim()
+  if (!funcaoId) return null
+  return funcaoId
+}
+
+async function getRbacStoreFromTenantKv(tenantId: string) {
+  const raw = await getTenantKvValue(tenantId, 'sisteq-rbac')
+  const parsed = parseMaybeJson(raw)
+  if (!parsed || typeof parsed !== 'object') return null
+  if ((parsed as any).version !== 1) return null
+  return parsed as any
+}
+
+export async function assertRbacAccess(tenantId: string, userId: string, moduleId: string, action: RbacAction) {
+  const user = await getUserById(tenantId, userId)
+  if (user.disabledAt) throw new ForbiddenError('Usuário desativado')
+  if (user.role === ROLE_ADMIN) return
+
+  const store = await getRbacStoreFromTenantKv(tenantId)
+  if (!store) {
+    if (action === 'ver') return
+    audit('rbac.denied', { tenantId, actorUserId: userId, moduleId, action, reason: 'store_missing' })
+    throw new ForbiddenError('Sem permissão para executar esta ação')
+  }
+
+  const funcaoId = await getUserFuncaoIdFromTenantKv(tenantId, userId)
+  if (!funcaoId) {
+    if (action === 'ver') return
+    audit('rbac.denied', { tenantId, actorUserId: userId, moduleId, action, reason: 'funcao_missing' })
+    throw new ForbiddenError('Sem permissão para executar esta ação')
+  }
+
+  const perms = store?.byFuncaoId?.[funcaoId]?.[moduleId]
+  if (!perms || typeof perms !== 'object') {
+    if (action === 'ver') return
+    audit('rbac.denied', { tenantId, actorUserId: userId, moduleId, action, reason: 'module_unset' })
+    throw new ForbiddenError('Sem permissão para executar esta ação')
+  }
+
+  const allowed = (perms as any)[action]
+  if (typeof allowed === 'boolean' ? allowed : action === 'ver') return
+
+  audit('rbac.denied', { tenantId, actorUserId: userId, moduleId, action, reason: 'denied' })
+  throw new ForbiddenError('Sem permissão para executar esta ação')
 }
 
 function listTenantUsers(db: DbShape, tenantId: string) {

@@ -4,7 +4,7 @@ import { modules, Module } from '../config/modules';
 import { ChevronDown, Menu } from 'lucide-react';
 import { UserMenuMinimized } from './UserMenuMinimized';
 import { useFornecedores } from '../hooks/useFornecedores';
-import { getUserRoleFromSession, setUserRoleToSession } from '../utils/helpers';
+import { canAccessModule, getUserIdFromSession, getUserRoleFromSession, isAdminRole, setUserIdToSession, setUserRoleToSession } from '../utils/helpers';
 
 interface TopMenuProps {
   activeModule: Module | undefined;
@@ -17,6 +17,7 @@ export function TopMenu({ activeModule, onModuleChange }: TopMenuProps) {
   const [isPointerInside, setIsPointerInside] = useState(false);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [rbacVersion, setRbacVersion] = useState(0);
   const isPointerInsideRef = useRef(false);
   const isProfileMenuOpenRef = useRef(false);
   const suppressCloseUntilRef = useRef(0);
@@ -27,7 +28,7 @@ export function TopMenu({ activeModule, onModuleChange }: TopMenuProps) {
   useEffect(() => {
     let cancelled = false;
     const cachedRole = getUserRoleFromSession();
-    if (cachedRole) setIsAdmin(cachedRole === 'Admin');
+    if (cachedRole) setIsAdmin(isAdminRole(cachedRole));
 
     async function hydrateRole() {
       try {
@@ -38,16 +39,32 @@ export function TopMenu({ activeModule, onModuleChange }: TopMenuProps) {
           return;
         }
         const role = typeof data?.user?.role === 'string' ? data.user.role : null;
+        const userId = String(data?.user?.id ?? '').trim() || null;
         if (cancelled) return;
         setUserRoleToSession(role);
-        setIsAdmin(role === 'Admin');
+        setUserIdToSession(userId);
+        setIsAdmin(isAdminRole(role));
       } catch {
       }
     }
 
-    if (!cachedRole) hydrateRole();
+    if (!cachedRole || !getUserIdFromSession()) hydrateRole();
     return () => {
       cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const onChanged = () => setRbacVersion(v => v + 1);
+    try {
+      window.addEventListener('sisteq:rbac-changed', onChanged as any);
+    } catch {
+    }
+    return () => {
+      try {
+        window.removeEventListener('sisteq:rbac-changed', onChanged as any);
+      } catch {
+      }
     };
   }, []);
 
@@ -85,6 +102,7 @@ export function TopMenu({ activeModule, onModuleChange }: TopMenuProps) {
   return (
     <div 
       className="relative z-50"
+      data-rbac-version={rbacVersion}
       onMouseEnter={() => {
         setIsPointerInside(true);
         isPointerInsideRef.current = true;
@@ -137,6 +155,7 @@ export function TopMenu({ activeModule, onModuleChange }: TopMenuProps) {
           <div className="flex items-center">
             {modules
               .filter((module) => module.id !== 'configuracoes')
+              .filter((module) => canAccessModule(module.id as any, 'ver'))
               .map((module) => {
                 const Icon = module.icon;
                 const isActive = activeModule?.id === module.id;

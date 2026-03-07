@@ -103,6 +103,27 @@ curl -fsS http://127.0.0.1:3000/api/health
 
 - CI: `.github/workflows/ci.yml` valida lint/typecheck/test/build e faz smoke-test do container com `GET /api/health`.
 
+## Roles e permissões (RBAC)
+
+Roles:
+
+- `Admin` (Administrador): acesso total às áreas administrativas.
+- `User` (Usuário): acesso restrito às áreas comuns.
+
+Regras relevantes no perfil:
+
+- Somente `Admin` pode ver e acessar as abas **Preferências**, **Notificações** e **Privacidade** em `/perfil`.
+- Somente `Admin` vê as entradas correspondentes nos menus de perfil (ex.: **Configurações**).
+- O backend bloqueia tentativas de acesso não autorizado com **403** e mensagem `Acesso restrito ao Administrador`.
+
+Endpoints protegidos (somente `Admin`):
+
+- `GET/PUT /api/profile/preferences`
+- `GET /api/profile/notifications`
+- `GET/PUT /api/profile/notifications/settings`
+- `POST /api/profile/notifications/read`
+- `GET/PUT /api/profile/privacy`
+
 ## Checklist pré-deploy (App Platform)
 
 - Validar `.do/app.yaml`:

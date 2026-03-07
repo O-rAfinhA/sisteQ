@@ -12,7 +12,7 @@ import {
 } from './ui/dropdown-menu';
 import { Badge } from './ui/badge';
 import { toast } from 'sonner';
-import { formatRoleWithOrganization, resetApplication, setUserRoleToSession } from '../utils/helpers';
+import { formatRoleWithOrganization, isAdminRole, resetApplication, setUserRoleToSession } from '../utils/helpers';
 
 interface UserMenuMinimizedProps {
   onOpenChange?: (open: boolean) => void;
@@ -73,7 +73,8 @@ export function UserMenuMinimized({
           throw new Error(meData?.error || 'Falha ao carregar usuário');
         }
         if (cancelled) return;
-        setUserRoleToSession(typeof meData?.user?.role === 'string' ? meData.user.role : null);
+        const role = typeof meData?.user?.role === 'string' ? meData.user.role : null;
+        setUserRoleToSession(role);
         setUser(prev => {
           const next = {
             name: meData?.user?.name ?? prev.name,
@@ -87,14 +88,18 @@ export function UserMenuMinimized({
           return next;
         });
 
-        const ntfRes = await fetch('/api/profile/notifications', { credentials: 'same-origin' });
-        const ntfData = await ntfRes.json().catch(() => null);
-        if (!ntfRes.ok) {
-          if (ntfRes.status === 401) return;
-          throw new Error(ntfData?.error || 'Falha ao carregar notificações');
+        if (isAdminRole(role)) {
+          const ntfRes = await fetch('/api/profile/notifications', { credentials: 'same-origin' });
+          const ntfData = await ntfRes.json().catch(() => null);
+          if (!ntfRes.ok) {
+            if (ntfRes.status === 401) return;
+            throw new Error(ntfData?.error || 'Falha ao carregar notificações');
+          }
+          if (cancelled) return;
+          setUser(prev => ({ ...prev, notifications: ntfData.unreadCount ?? 0 }));
+        } else {
+          setUser(prev => ({ ...prev, notifications: 0 }));
         }
-        if (cancelled) return;
-        setUser(prev => ({ ...prev, notifications: ntfData.unreadCount ?? 0 }));
       } catch (e: any) {
         if (!cancelled) toast.error(e?.message || 'Falha ao carregar usuário');
       } finally {
@@ -275,7 +280,10 @@ export function UserMenuMinimized({
               <p className="truncate text-sm font-medium leading-5 text-foreground">{title}</p>
               {!!user.email && <p className="truncate text-xs leading-4 text-muted-foreground">{user.email}</p>}
               {!!user.role && (
-                <Badge variant="secondary" className="mt-1 text-xs whitespace-normal break-words">
+                <Badge
+                  variant="outline"
+                  className="mt-1 inline-flex justify-start border-0 bg-transparent px-0 py-0 text-xs font-normal leading-4 text-muted-foreground whitespace-normal break-words rounded-none"
+                >
                   {formatRoleWithOrganization({
                     role: user.role,
                     organizationName: user.organizationName,
@@ -303,42 +311,44 @@ export function UserMenuMinimized({
           <span>Meu Perfil</span>
         </DropdownMenuItem>
 
-        {/* Configurações */}
-        <DropdownMenuItem
-          onSelect={() => {
-            clearHoverTimers();
-            onItemSelect?.();
-            navigate('/perfil?tab=preferences');
-          }}
-          onMouseEnter={handleOptionMouseEnter}
-          onMouseLeave={handleOptionMouseLeave}
-        >
-          <Settings />
-          <span>Configurações</span>
-        </DropdownMenuItem>
+        {isAdminRole(user.role) && (
+          <DropdownMenuItem
+            onSelect={() => {
+              clearHoverTimers();
+              onItemSelect?.();
+              navigate('/perfil?tab=preferences');
+            }}
+            onMouseEnter={handleOptionMouseEnter}
+            onMouseLeave={handleOptionMouseLeave}
+          >
+            <Settings />
+            <span>Configurações</span>
+          </DropdownMenuItem>
+        )}
 
-        {/* Notificações */}
-        <DropdownMenuItem
-          onSelect={() => {
-            clearHoverTimers();
-            onItemSelect?.();
-            navigate('/perfil?tab=notifications');
-          }}
-          onMouseEnter={handleOptionMouseEnter}
-          onMouseLeave={handleOptionMouseLeave}
-        >
-          <div className="flex items-center justify-between w-full">
-            <div className="flex items-center gap-2">
-              <Bell />
-              <span>Notificações</span>
+        {isAdminRole(user.role) && (
+          <DropdownMenuItem
+            onSelect={() => {
+              clearHoverTimers();
+              onItemSelect?.();
+              navigate('/perfil?tab=notifications');
+            }}
+            onMouseEnter={handleOptionMouseEnter}
+            onMouseLeave={handleOptionMouseLeave}
+          >
+            <div className="flex items-center justify-between w-full">
+              <div className="flex items-center gap-2">
+                <Bell />
+                <span>Notificações</span>
+              </div>
+              {user.notifications > 0 && (
+                <Badge variant="destructive" className="ml-2 tabular-nums">
+                  {user.notifications}
+                </Badge>
+              )}
             </div>
-            {user.notifications > 0 && (
-              <Badge variant="destructive" className="ml-2 tabular-nums">
-                {user.notifications}
-              </Badge>
-            )}
-          </div>
-        </DropdownMenuItem>
+          </DropdownMenuItem>
+        )}
 
         {/* Ajuda e Suporte */}
         <DropdownMenuItem

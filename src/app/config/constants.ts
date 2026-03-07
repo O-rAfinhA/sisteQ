@@ -220,6 +220,10 @@ export const STORAGE_KEYS = {
 
   // Preferências
   USER_PREFERENCES: 'user-preferences',
+
+  // RBAC e auditoria
+  RBAC: 'sisteq-rbac',
+  AUDIT_LOG: 'sisteq-audit-log',
 } as const;
 
 // ============ DEBOUNCE TIMES ============

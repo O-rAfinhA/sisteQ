@@ -1,10 +1,11 @@
-import { generateId, getFromStorage } from '../../utils/helpers';
+import { modules } from '../../config/modules';
+import { generateId, getFromStorage, getRbacStore, getUserIdFromSession, getUserRoleFromSession, isAdminRole, setFuncaoModulePermissions, type RbacAction, type RbacModuleId } from '../../utils/helpers';
 import { formatarDataHoje } from '../../utils/formatters';
 import { MetricCard } from '../../components/ui/metric-card';
 import { Button } from '../../components/ui/button';
 import { useState, useEffect } from 'react';
 import { useLocalStorage } from '../../hooks/useLocalStorage';
-import { Briefcase, Plus, Edit2, Trash2 } from 'lucide-react';
+import { Briefcase, Plus, Edit2, Trash2, Shield } from 'lucide-react';
 
 export interface Funcao {
   id: string;
@@ -20,6 +21,8 @@ export function Funcoes() {
   const [departamentos, setDepartamentos] = useState<string[]>([]);
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [permissoesFuncaoId, setPermissoesFuncaoId] = useState<string | null>(null);
+  const [, setRbacTick] = useState(0);
   const [formData, setFormData] = useState<Omit<Funcao, 'id' | 'dataCadastro'>>({
     nome: '',
     nivel: '',
@@ -31,6 +34,20 @@ export function Funcoes() {
   useEffect(() => {
     const deps = getFromStorage<any[]>('departamentos', []);
     setDepartamentos(deps.filter((d: any) => d.ativo).map((d: any) => d.nome));
+  }, []);
+
+  useEffect(() => {
+    const onChanged = () => setRbacTick(v => v + 1);
+    try {
+      window.addEventListener('sisteq:rbac-changed', onChanged as any);
+    } catch {
+    }
+    return () => {
+      try {
+        window.removeEventListener('sisteq:rbac-changed', onChanged as any);
+      } catch {
+      }
+    };
   }, []);
 
   const handleAdd = () => {
@@ -52,6 +69,7 @@ export function Funcoes() {
 
   const handleEdit = (funcao: Funcao) => {
     setEditingId(funcao.id);
+    setPermissoesFuncaoId(null);
     setFormData({
       nome: funcao.nome,
       nivel: funcao.nivel,
@@ -79,6 +97,7 @@ export function Funcoes() {
   const handleDelete = (id: string) => {
     if (confirm('Deseja realmente excluir esta função?')) {
       setFuncoes(prev => prev.filter(funcao => funcao.id !== id));
+      if (permissoesFuncaoId === id) setPermissoesFuncaoId(null);
     }
   };
 
@@ -95,10 +114,34 @@ export function Funcoes() {
     resetForm();
     setIsAdding(false);
     setEditingId(null);
+    setPermissoesFuncaoId(null);
   };
 
   const totalAtivos = funcoes.filter(f => f.ativo).length;
   const isManagingRecord = isAdding || Boolean(editingId);
+  const isAdmin = isAdminRole(getUserRoleFromSession());
+  const rbacStore = getRbacStore();
+  const rbacModules: { id: RbacModuleId; label: string }[] = modules
+    .filter(m =>
+      m.id === 'gestao-estrategica' ||
+      m.id === 'processos' ||
+      m.id === 'indicadores' ||
+      m.id === 'gestao-riscos' ||
+      m.id === 'acoes-corretivas' ||
+      m.id === 'documentos' ||
+      m.id === 'recursos-humanos' ||
+      m.id === 'fornecedores' ||
+      m.id === 'instrumentos-medicao' ||
+      m.id === 'manutencao'
+    )
+    .map(m => ({ id: m.id as RbacModuleId, label: m.label }));
+  const rbacActions: { id: RbacAction; label: string }[] = [
+    { id: 'ver', label: 'Ver' },
+    { id: 'criar', label: 'Criar' },
+    { id: 'editar', label: 'Editar' },
+    { id: 'excluir', label: 'Excluir' },
+  ];
+  const funcaoPermissao = funcoes.find(f => f.id === permissoesFuncaoId) ?? null;
 
   return (
     <div className="p-8 max-w-[1400px] mx-auto space-y-8">
@@ -222,12 +265,76 @@ export function Funcoes() {
             </div>
           </div>
         )}
+        {isAdmin && !isManagingRecord && funcaoPermissao && (
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <Shield className="w-6 h-6 text-blue-600" />
+                <div>
+                  <h3 className="text-gray-900" style={{ fontSize: '1.125rem', fontWeight: 600 }}>
+                    Permissões por Módulo
+                  </h3>
+                  <p className="text-sm text-gray-600">
+                    Função: <span className="font-medium text-gray-900">{funcaoPermissao.nome}</span>
+                  </p>
+                </div>
+              </div>
+              <Button variant="ghost" onClick={() => setPermissoesFuncaoId(null)}>
+                Fechar
+              </Button>
+            </div>
+
+            <div className="mt-5 overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-gray-50/60">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs text-gray-500" style={{ fontWeight: 500 }}>Módulo</th>
+                    {rbacActions.map(a => (
+                      <th key={a.id} className="px-4 py-3 text-center text-xs text-gray-500" style={{ fontWeight: 500 }}>
+                        {a.label}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {rbacModules.map(m => (
+                    <tr key={m.id} className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm text-gray-900 font-medium">{m.label}</td>
+                      {rbacActions.map(a => {
+                        const raw = (rbacStore.byFuncaoId?.[funcaoPermissao.id]?.[m.id] as any)?.[a.id];
+                        const effective = typeof raw === 'boolean' ? raw : a.id === 'ver';
+                        return (
+                          <td key={a.id} className="px-4 py-3 text-center">
+                            <input
+                              type="checkbox"
+                              checked={Boolean(effective)}
+                              onChange={(e) => {
+                                setFuncaoModulePermissions({
+                                  funcaoId: funcaoPermissao.id,
+                                  moduleId: m.id,
+                                  permissions: { [a.id]: e.target.checked } as any,
+                                  updatedByUserId: getUserIdFromSession(),
+                                });
+                                setRbacTick(v => v + 1);
+                              }}
+                              className="w-4 h-4 text-blue-600 border-gray-200 rounded focus:ring-blue-500"
+                            />
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
 
         {/* Tabela */}
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           {funcoes.length === 0 ? (
             <div className="text-center py-12">
-              <Briefcase className="w-16 h-16 text-orange-200 mx-auto mb-4" />
               <h3 className="text-gray-900 mb-2" style={{ fontSize: '1.125rem', fontWeight: 600 }}>
                 Nenhuma função cadastrada
               </h3>
@@ -286,6 +393,17 @@ export function Funcoes() {
                       </td>
                       <td className="px-4 py-3 text-center">
                         <div className="flex items-center justify-center gap-2">
+                          {isAdmin && !isManagingRecord && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setPermissoesFuncaoId(funcao.id)}
+                              className="text-indigo-600 hover:bg-indigo-50"
+                              title="Permissões"
+                            >
+                              <Shield className="w-4 h-4" />
+                            </Button>
+                          )}
                           <Button
                             variant="ghost"
                             size="sm"

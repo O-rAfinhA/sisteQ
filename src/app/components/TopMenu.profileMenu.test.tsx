@@ -360,4 +360,21 @@ describe('TopMenu (menu de perfil)', () => {
 
     expect(screen.queryByTitle('Configurações')).not.toBeInTheDocument();
   });
+
+  it('oculta "Configurações" e "Notificações" no menu para usuário comum', async () => {
+    meRole = 'User';
+    const user = userEvent.setup();
+    const { container } = render(
+      <TopMenu activeModule={undefined} onModuleChange={vi.fn()} />,
+    );
+
+    fireEvent.mouseEnter(container.firstElementChild!);
+
+    const profileTrigger = screen.getByRole('button', { name: /conta/i });
+    await user.click(profileTrigger);
+    expect(await screen.findByText(/meu perfil/i)).toBeInTheDocument();
+
+    expect(screen.queryByText('Configurações')).not.toBeInTheDocument();
+    expect(screen.queryByText('Notificações')).not.toBeInTheDocument();
+  });
 });

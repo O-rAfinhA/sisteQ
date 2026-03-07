@@ -84,6 +84,278 @@ export function formatRoleLabel(role: string, language: 'pt-BR' | 'en-US' = 'pt-
   return raw;
 }
 
+export function isAdminRole(role: unknown): boolean {
+  const raw = String(role ?? '').trim()
+  return raw === 'Admin' || raw === 'Administrador' || raw === 'Administrator'
+}
+
+export type RbacAction = 'ver' | 'criar' | 'editar' | 'excluir'
+export type RbacModuleId =
+  | 'gestao-estrategica'
+  | 'processos'
+  | 'indicadores'
+  | 'gestao-riscos'
+  | 'acoes-corretivas'
+  | 'documentos'
+  | 'recursos-humanos'
+  | 'fornecedores'
+  | 'instrumentos-medicao'
+  | 'manutencao'
+  | 'configuracoes'
+
+export type RbacPermissionSet = Record<RbacAction, boolean>
+export type RbacFunctionPermissions = Partial<Record<RbacModuleId, Partial<RbacPermissionSet>>>
+export type RbacStoreV1 = {
+  version: 1
+  updatedAt: string
+  updatedByUserId?: string
+  byFuncaoId: Record<string, RbacFunctionPermissions>
+}
+
+const ACTIVE_MODULE_ID_SESSION_KEY = 'sisteq:activeModuleId'
+
+export function getActiveModuleIdFromSession(): string | null {
+  if (typeof window === 'undefined') return null
+  const ss: any = (window as any).sessionStorage
+  if (!ss || typeof ss.getItem !== 'function') return null
+  const raw = storageSafeGet(ss, ACTIVE_MODULE_ID_SESSION_KEY)
+  if (typeof raw !== 'string' || !raw.trim()) return null
+  return raw.trim()
+}
+
+export function setActiveModuleIdToSession(moduleId: string | null) {
+  if (typeof window === 'undefined') return
+  const ss: any = (window as any).sessionStorage
+  if (!ss) return
+  if (!moduleId) {
+    storageSafeRemove(ss, ACTIVE_MODULE_ID_SESSION_KEY)
+    return
+  }
+  storageSafeSet(ss, ACTIVE_MODULE_ID_SESSION_KEY, String(moduleId))
+}
+
+function nowIso() {
+  return new Date().toISOString()
+}
+
+function safeParseJson(raw: string | null) {
+  if (raw == null) return null
+  try {
+    return JSON.parse(raw)
+  } catch {
+    return null
+  }
+}
+
+function defaultPermissionSet(): RbacPermissionSet {
+  return { ver: false, criar: false, editar: false, excluir: false }
+}
+
+export function getRbacStore(): RbacStoreV1 {
+  if (typeof window === 'undefined') return { version: 1, updatedAt: nowIso(), byFuncaoId: {} }
+  const ls: any = (window as any).localStorage
+  const raw = ls && typeof ls.getItem === 'function' ? storageSafeGet(ls, STORAGE_KEYS.RBAC) : null
+  const parsed = safeParseJson(raw)
+  if (!parsed || typeof parsed !== 'object') {
+    return { version: 1, updatedAt: nowIso(), byFuncaoId: {} }
+  }
+  if ((parsed as any).version !== 1) {
+    return { version: 1, updatedAt: nowIso(), byFuncaoId: {} }
+  }
+  const byFuncaoId = (parsed as any).byFuncaoId
+  return {
+    version: 1,
+    updatedAt: typeof (parsed as any).updatedAt === 'string' ? (parsed as any).updatedAt : nowIso(),
+    updatedByUserId: typeof (parsed as any).updatedByUserId === 'string' ? (parsed as any).updatedByUserId : undefined,
+    byFuncaoId: byFuncaoId && typeof byFuncaoId === 'object' ? byFuncaoId : {},
+  }
+}
+
+export function setRbacStore(next: RbacStoreV1) {
+  if (typeof window === 'undefined') return
+  const ls: any = (window as any).localStorage
+  if (!ls || typeof ls.setItem !== 'function') return
+  storageSafeSet(ls, STORAGE_KEYS.RBAC, JSON.stringify(next))
+  try {
+    window.dispatchEvent(new CustomEvent('sisteq:rbac-changed', { detail: { updatedAt: next.updatedAt } }))
+  } catch {
+  }
+}
+
+export function setFuncaoModulePermissions(opts: {
+  funcaoId: string
+  moduleId: RbacModuleId
+  permissions: Partial<RbacPermissionSet>
+  updatedByUserId?: string | null
+}) {
+  const funcaoId = String(opts.funcaoId ?? '').trim()
+  const moduleId = String(opts.moduleId ?? '').trim() as RbacModuleId
+  if (!funcaoId || !moduleId) return
+  const store = getRbacStore()
+  const current = store.byFuncaoId[funcaoId] ?? {}
+  const merged: RbacPermissionSet = {
+    ...defaultPermissionSet(),
+    ...(current[moduleId] ?? {}),
+    ...(opts.permissions ?? {}),
+  }
+  const next: RbacStoreV1 = {
+    ...store,
+    updatedAt: nowIso(),
+    updatedByUserId: opts.updatedByUserId ? String(opts.updatedByUserId) : store.updatedByUserId,
+    byFuncaoId: {
+      ...store.byFuncaoId,
+      [funcaoId]: {
+        ...current,
+        [moduleId]: merged,
+      },
+    },
+  }
+  setRbacStore(next)
+}
+
+export function canAccessModule(moduleId: RbacModuleId, action: RbacAction): boolean {
+  const role = getUserRoleFromSession()
+  if (isAdminRole(role)) return true
+  const userId = getUserIdFromSession()
+  if (!userId) return false
+
+  const usuarios = getFromStorage<any[]>(STORAGE_KEYS.CONFIG_USUARIOS, [])
+  const me = usuarios.find(u => String(u?.id ?? '').trim() === userId)
+  const funcaoNome = String(me?.funcao ?? '').trim()
+  if (!funcaoNome) return false
+
+  const funcoes = getFromStorage<any[]>(STORAGE_KEYS.CONFIG_FUNCOES, [])
+  const funcao = funcoes.find(f => String(f?.nome ?? '').trim() === funcaoNome)
+  const funcaoId = String(funcao?.id ?? '').trim()
+  if (!funcaoId) return false
+
+  const store = getRbacStore()
+  const perms = store.byFuncaoId?.[funcaoId]?.[moduleId] ?? null
+  if (!perms || typeof perms !== 'object') return action === 'ver'
+  const v = (perms as any)[action]
+  if (typeof v === 'boolean') return v
+  return action === 'ver'
+}
+
+export type AuditEntry = {
+  ts: string
+  userId?: string | null
+  role?: string | null
+  moduleId?: string | null
+  action?: string | null
+  allowed?: boolean
+  key?: string | null
+  detail?: any
+}
+
+export function appendAuditLog(entry: Omit<AuditEntry, 'ts'> & { ts?: string }) {
+  if (typeof window === 'undefined') return
+  const ls: any = (window as any).localStorage
+  if (!ls || typeof ls.getItem !== 'function' || typeof ls.setItem !== 'function') return
+  const next: AuditEntry = { ts: entry.ts || nowIso(), ...entry }
+  const raw = storageSafeGet(ls, STORAGE_KEYS.AUDIT_LOG)
+  const arr = (() => {
+    const parsed = safeParseJson(raw)
+    return Array.isArray(parsed) ? parsed : []
+  })()
+  const capped = [...arr, next].slice(-2000)
+  storageSafeSet(ls, STORAGE_KEYS.AUDIT_LOG, JSON.stringify(capped))
+}
+
+function moduleIdForStorageKey(key: string): RbacModuleId | null {
+  const k = String(key ?? '').trim()
+  if (!k) return null
+
+  if (k === STORAGE_KEYS.STRATEGIC_DATA) {
+    const active = getActiveModuleIdFromSession()
+    if (
+      active === 'gestao-estrategica' ||
+      active === 'gestao-riscos' ||
+      active === 'acoes-corretivas'
+    ) {
+      return active as RbacModuleId
+    }
+    return 'gestao-estrategica'
+  }
+  if (k === STORAGE_KEYS.YEARS_DATA) return 'gestao-estrategica'
+  if (k === STORAGE_KEYS.PROCESSOS_DATA || k === STORAGE_KEYS.PROCESSOS_LISTA) return 'processos'
+  if (k === STORAGE_KEYS.KPI_DATA) return 'indicadores'
+
+  if (
+    k === STORAGE_KEYS.DOCS_INTERNOS ||
+    k === STORAGE_KEYS.DOCS_CLIENTES ||
+    k === STORAGE_KEYS.DOCS_EXTERNOS ||
+    k === STORAGE_KEYS.DOCS_LICENCAS ||
+    k === STORAGE_KEYS.DOCS_CERTIDOES ||
+    k === STORAGE_KEYS.TIPOS_DOCS_INTERNOS ||
+    k === STORAGE_KEYS.TIPOS_DOCS_CLIENTES ||
+    k === STORAGE_KEYS.TIPOS_DOCS_EXTERNOS ||
+    k === STORAGE_KEYS.TIPOS_LICENCAS ||
+    k === STORAGE_KEYS.TIPOS_CERTIDOES
+  ) {
+    return 'documentos'
+  }
+
+  if (
+    k === STORAGE_KEYS.COLABORADORES ||
+    k === STORAGE_KEYS.INTEGRACAO ||
+    k === STORAGE_KEYS.FICHAS_INTEGRACAO ||
+    k === STORAGE_KEYS.AVALIACAO_EXPERIENCIA ||
+    k === STORAGE_KEYS.CONFIG_EXPERIENCIA ||
+    k === STORAGE_KEYS.AVALIACAO_DESEMPENHO ||
+    k === STORAGE_KEYS.DESCRICAO_FUNCOES ||
+    k === STORAGE_KEYS.MATRIZ_ATIVIDADES ||
+    k === STORAGE_KEYS.MATRIZ_QUALIFICACOES ||
+    k === STORAGE_KEYS.PLANO_QUALIFICACAO
+  ) {
+    return 'recursos-humanos'
+  }
+
+  if (
+    k === STORAGE_KEYS.FORNECEDORES_DATA ||
+    k === STORAGE_KEYS.FORNECEDORES_CONFIG ||
+    k === STORAGE_KEYS.FORNECEDORES_ROF ||
+    k === STORAGE_KEYS.FORNECEDORES_AVALIACOES ||
+    k === 'fornecedores_recebimentos' ||
+    k === 'fornecedores_pedidos'
+  ) {
+    return 'fornecedores'
+  }
+
+  if (k === 'sisteq-instrumentos' || k === 'sisteq-padroes-referencia' || k === 'sisteq-tipos-instrumentos') {
+    return 'instrumentos-medicao'
+  }
+
+  if (
+    k === 'sisteq-manutencao-equipamentos' ||
+    k === 'sisteq-manutencao-os' ||
+    k === 'sisteq-manutencao-planos' ||
+    k === 'sisteq-manutencao-tipos-equipamento'
+  ) {
+    return 'manutencao'
+  }
+
+  return null
+}
+
+function inferActionFromSet(oldRaw: string | null, newRaw: string): RbacAction {
+  const oldParsed = safeParseJson(oldRaw)
+  const newParsed = safeParseJson(newRaw)
+  if (Array.isArray(oldParsed) && Array.isArray(newParsed)) {
+    if (newParsed.length > oldParsed.length) return 'criar'
+    if (newParsed.length < oldParsed.length) return 'excluir'
+    return 'editar'
+  }
+  return 'editar'
+}
+
+function dispatchRbacDenied(detail: any) {
+  try {
+    window.dispatchEvent(new CustomEvent('sisteq:rbac-denied', { detail }))
+  } catch {
+  }
+}
+
 export function formatRoleWithOrganization(opts: {
   role: string;
   organizationName?: string | null;
@@ -334,6 +606,7 @@ export async function persistKvKeyNow(key: string): Promise<{ ok: boolean; statu
 }
 
 const TENANT_ID_SESSION_KEY = 'sisteq:tenantId';
+const USER_ID_SESSION_KEY = 'sisteq:userId';
 const USER_ROLE_SESSION_KEY = 'sisteq:userRole';
 const TENANT_SHIM_KEY = '__SISTEQ_TENANT_SHIM__';
 const LEGACY_OWNER_TENANT_KEY = '__SISTEQ_LEGACY_OWNER_TENANT__';
@@ -517,6 +790,26 @@ export function setTenantIdToSession(tenantId: string | null) {
     return;
   }
   storageSafeSet(ss, TENANT_ID_SESSION_KEY, tenantId);
+}
+
+export function getUserIdFromSession(): string | null {
+  if (typeof window === 'undefined') return null;
+  const ss: any = (window as any).sessionStorage;
+  if (!ss || typeof ss.getItem !== 'function') return null;
+  const raw = storageSafeGet(ss, USER_ID_SESSION_KEY);
+  if (typeof raw !== 'string' || !raw.trim()) return null;
+  return raw.trim();
+}
+
+export function setUserIdToSession(userId: string | null) {
+  if (typeof window === 'undefined') return;
+  const ss: any = (window as any).sessionStorage;
+  if (!ss) return;
+  if (!userId) {
+    storageSafeRemove(ss, USER_ID_SESSION_KEY);
+    return;
+  }
+  storageSafeSet(ss, USER_ID_SESSION_KEY, userId);
 }
 
 export function getUserRoleFromSession(): string | null {
@@ -798,6 +1091,41 @@ export function installTenantLocalStorageShim(tenantId: string) {
     const k = String(key ?? '');
     if (!k) return originalSetItem(k, value);
     if (!state?.shouldScope?.(k)) return originalSetItem(k, value);
+    if (k === STORAGE_KEYS.AUDIT_LOG || k === STORAGE_KEYS.RBAC) {
+      const out = originalSetItem(`${tid}::${k}`, value);
+      scheduleKvWrite(k, value);
+      return out;
+    }
+
+    const hasAuthContext = Boolean(getUserIdFromSession() || getUserRoleFromSession());
+    const moduleId = moduleIdForStorageKey(k);
+    if (hasAuthContext && moduleId) {
+      const oldRaw = originalGetItem(`${tid}::${k}`);
+      const action = inferActionFromSet(oldRaw, String(value ?? ''));
+      const allowed = canAccessModule(moduleId, action);
+      if (!allowed) {
+        const detail = { moduleId, action, key: k };
+        appendAuditLog({
+          userId: getUserIdFromSession(),
+          role: getUserRoleFromSession(),
+          moduleId,
+          action,
+          allowed: false,
+          key: k,
+        });
+        dispatchRbacDenied(detail);
+        return;
+      }
+      appendAuditLog({
+        userId: getUserIdFromSession(),
+        role: getUserRoleFromSession(),
+        moduleId,
+        action,
+        allowed: true,
+        key: k,
+      });
+    }
+
     const out = originalSetItem(`${tid}::${k}`, value);
     scheduleKvWrite(k, value);
     return out;
@@ -810,6 +1138,38 @@ export function installTenantLocalStorageShim(tenantId: string) {
       const k = String(key ?? '');
       if (!k) return originalRemoveItem(k);
       if (!state?.shouldScope?.(k)) return originalRemoveItem(k);
+      if (k === STORAGE_KEYS.AUDIT_LOG || k === STORAGE_KEYS.RBAC) {
+        return originalRemoveItem(`${tid}::${k}`);
+      }
+
+      const hasAuthContext = Boolean(getUserIdFromSession() || getUserRoleFromSession());
+      const moduleId = moduleIdForStorageKey(k);
+      if (hasAuthContext && moduleId) {
+        const action: RbacAction = 'excluir';
+        const allowed = canAccessModule(moduleId, action);
+        if (!allowed) {
+          const detail = { moduleId, action, key: k };
+          appendAuditLog({
+            userId: getUserIdFromSession(),
+            role: getUserRoleFromSession(),
+            moduleId,
+            action,
+            allowed: false,
+            key: k,
+          });
+          dispatchRbacDenied(detail);
+          return;
+        }
+        appendAuditLog({
+          userId: getUserIdFromSession(),
+          role: getUserRoleFromSession(),
+          moduleId,
+          action,
+          allowed: true,
+          key: k,
+        });
+      }
+
       return originalRemoveItem(`${tid}::${k}`);
     };
   }
@@ -910,12 +1270,16 @@ export function installTenantFetchShim(tenantId: string) {
     if (!tid || !shouldDecorate(url)) return baseFetch(input, init);
 
     const headerKey = 'x-company-id';
+    const moduleHeaderKey = 'x-sisteq-module-id';
+    const activeModuleId = getActiveModuleIdFromSession()
     const extra: Record<string, string> = { [headerKey]: tid };
+    if (activeModuleId) extra[moduleHeaderKey] = activeModuleId
 
     try {
       if (input instanceof Request) {
         const headers = new Headers(input.headers);
         if (!headers.has(headerKey)) headers.set(headerKey, tid);
+        if (activeModuleId && !headers.has(moduleHeaderKey)) headers.set(moduleHeaderKey, activeModuleId);
         if (init?.headers) {
           const extraHeaders = new Headers(init.headers as any);
           extraHeaders.forEach((v, k) => {
@@ -929,6 +1293,7 @@ export function installTenantFetchShim(tenantId: string) {
 
       const headers = new Headers((init?.headers as any) ?? undefined);
       if (!headers.has(headerKey)) headers.set(headerKey, tid);
+      if (activeModuleId && !headers.has(moduleHeaderKey)) headers.set(moduleHeaderKey, activeModuleId);
       return baseFetch(input, { ...(init ?? {}), headers });
     } catch {
       const nextHeaders = { ...(init?.headers as any), ...extra };

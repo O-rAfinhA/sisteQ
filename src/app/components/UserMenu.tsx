@@ -12,7 +12,7 @@ import {
 } from './ui/dropdown-menu';
 import { Badge } from './ui/badge';
 import { toast } from 'sonner';
-import { formatRoleWithOrganization, resetApplication, setUserRoleToSession } from '../utils/helpers';
+import { formatRoleWithOrganization, isAdminRole, resetApplication, setUserRoleToSession } from '../utils/helpers';
 
 type UserState = {
   name: string;
@@ -71,7 +71,8 @@ export function UserMenu() {
           throw new Error(meData?.error || 'Falha ao carregar usuário');
         }
         if (cancelled) return;
-        setUserRoleToSession(typeof meData?.user?.role === 'string' ? meData.user.role : null);
+        const role = typeof meData?.user?.role === 'string' ? meData.user.role : null;
+        setUserRoleToSession(role);
         setUser(prev => {
           const next = {
             name: meData?.user?.name ?? prev.name,
@@ -85,14 +86,18 @@ export function UserMenu() {
           return next;
         });
 
-        const ntfRes = await fetch('/api/profile/notifications', { credentials: 'same-origin' });
-        const ntfData = await ntfRes.json().catch(() => null);
-        if (!ntfRes.ok) {
-          if (ntfRes.status === 401) return;
-          throw new Error(ntfData?.error || 'Falha ao carregar notificações');
+        if (isAdminRole(role)) {
+          const ntfRes = await fetch('/api/profile/notifications', { credentials: 'same-origin' });
+          const ntfData = await ntfRes.json().catch(() => null);
+          if (!ntfRes.ok) {
+            if (ntfRes.status === 401) return;
+            throw new Error(ntfData?.error || 'Falha ao carregar notificações');
+          }
+          if (cancelled) return;
+          setUser(prev => ({ ...prev, notifications: ntfData.unreadCount ?? 0 }));
+        } else {
+          setUser(prev => ({ ...prev, notifications: 0 }));
         }
-        if (cancelled) return;
-        setUser(prev => ({ ...prev, notifications: ntfData.unreadCount ?? 0 }));
       } catch (e: any) {
         if (!cancelled) toast.error(e?.message || 'Falha ao carregar usuário');
       } finally {
@@ -201,35 +206,38 @@ export function UserMenu() {
         </DropdownMenuItem>
 
         {/* Configurações */}
-        <DropdownMenuItem
-          className="cursor-pointer py-2.5"
-          onSelect={() => {
-            navigate('/perfil?tab=preferences');
-          }}
-        >
-          <Settings className="w-4 h-4 mr-3 text-gray-600" />
-          <span>Configurações</span>
-        </DropdownMenuItem>
+        {isAdminRole(user.role) && (
+          <DropdownMenuItem
+            className="cursor-pointer py-2.5"
+            onSelect={() => {
+              navigate('/perfil?tab=preferences');
+            }}
+          >
+            <Settings className="w-4 h-4 mr-3 text-gray-600" />
+            <span>Configurações</span>
+          </DropdownMenuItem>
+        )}
 
-        {/* Notificações */}
-        <DropdownMenuItem
-          className="cursor-pointer py-2.5"
-          onSelect={() => {
-            navigate('/perfil?tab=notifications');
-          }}
-        >
-          <div className="flex items-center justify-between w-full">
-            <div className="flex items-center">
-              <Bell className="w-4 h-4 mr-3 text-gray-600" />
-              <span>Notificações</span>
+        {isAdminRole(user.role) && (
+          <DropdownMenuItem
+            className="cursor-pointer py-2.5"
+            onSelect={() => {
+              navigate('/perfil?tab=notifications');
+            }}
+          >
+            <div className="flex items-center justify-between w-full">
+              <div className="flex items-center">
+                <Bell className="w-4 h-4 mr-3 text-gray-600" />
+                <span>Notificações</span>
+              </div>
+              {user.notifications > 0 && (
+                <Badge variant="destructive" className="ml-2">
+                  {user.notifications}
+                </Badge>
+              )}
             </div>
-            {user.notifications > 0 && (
-              <Badge variant="destructive" className="ml-2">
-                {user.notifications}
-              </Badge>
-            )}
-          </div>
-        </DropdownMenuItem>
+          </DropdownMenuItem>
+        )}
 
         {/* Ajuda e Suporte */}
         <DropdownMenuItem

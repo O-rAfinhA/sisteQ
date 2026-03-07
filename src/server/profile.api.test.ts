@@ -207,6 +207,71 @@ describe('Profile API', () => {
     expect(json.preferences.compactMode).toBe(true)
   })
 
+  it('bloqueia Preferências/Notificações/Privacidade para usuário comum', async () => {
+    const tenantSlug = uniqueTenantSlug()
+    const { user: admin } = await registerTenantAndUser({
+      tenantSlug,
+      companyName: 'Empresa',
+      name: 'Admin',
+      email: `admin-${Date.now()}-${Math.random()}@example.com`,
+      password: 'Senha@12345',
+    })
+    const adminCookie = cookieHeaderFromSetCookie(await createAuthCookiesForUser(admin))
+
+    const email = `user-${Date.now()}-${Math.random()}@example.com`
+    const password = 'Senha@12345'
+    const created = await callProfileApi({
+      method: 'POST',
+      slug: ['users'],
+      cookie: adminCookie,
+      body: { name: 'Usuário', email, password },
+    })
+    expect(created.status).toBe(201)
+
+    const logged = await loginAs({ tenantSlug, email, password })
+    expect(logged.status).toBe(200)
+
+    const forbiddenPreferencesGet = await callProfileApi({ method: 'GET', slug: ['preferences'], cookie: logged.cookie })
+    expect(forbiddenPreferencesGet.status).toBe(403)
+
+    const forbiddenPreferencesPut = await callProfileApi({
+      method: 'PUT',
+      slug: ['preferences'],
+      cookie: logged.cookie,
+      body: { theme: 'dark' },
+    })
+    expect(forbiddenPreferencesPut.status).toBe(403)
+
+    const forbiddenNotificationsGet = await callProfileApi({ method: 'GET', slug: ['notifications'], cookie: logged.cookie })
+    expect(forbiddenNotificationsGet.status).toBe(403)
+
+    const forbiddenNotificationSettingsGet = await callProfileApi({
+      method: 'GET',
+      slug: ['notifications', 'settings'],
+      cookie: logged.cookie,
+    })
+    expect(forbiddenNotificationSettingsGet.status).toBe(403)
+
+    const forbiddenNotificationRead = await callProfileApi({
+      method: 'POST',
+      slug: ['notifications', 'read'],
+      cookie: logged.cookie,
+      body: { id: 'n_qualquer' },
+    })
+    expect(forbiddenNotificationRead.status).toBe(403)
+
+    const forbiddenPrivacyGet = await callProfileApi({ method: 'GET', slug: ['privacy'], cookie: logged.cookie })
+    expect(forbiddenPrivacyGet.status).toBe(403)
+
+    const forbiddenPrivacyPut = await callProfileApi({
+      method: 'PUT',
+      slug: ['privacy'],
+      cookie: logged.cookie,
+      body: { showEmail: true },
+    })
+    expect(forbiddenPrivacyPut.status).toBe(403)
+  }, 20_000)
+
   it('POST /profile/support/tickets cria chamado e lista', async () => {
     const cookie = await createAuthCookie()
 
@@ -614,5 +679,101 @@ describe('Tenant KV API (Arquivo)', () => {
     expect(list.json.keys).toContain(key)
 
     void tenant
+  })
+
+  it('aplica RBAC no Tenant KV (fallback)', async () => {
+    const { tenant, cookie: adminCookie } = await createTenantCookie()
+    const tenantSlug = typeof (tenant as any)?.slug === 'string' ? String((tenant as any).slug) : ''
+
+    const userEmail = `user-${Date.now()}-${Math.random()}@example.com`
+    const password = 'Senha@12345'
+    const created = await callProfileApi({
+      method: 'POST',
+      slug: ['users'],
+      cookie: adminCookie,
+      body: { name: 'User', email: userEmail, password },
+    })
+    expect(created.status).toBe(201)
+    const userId = String(created.json?.user?.id ?? '').trim()
+    expect(userId).toMatch(/^u_/)
+
+    const loginReq: any = {
+      method: 'POST',
+      headers: { 'x-tenant': tenantSlug },
+      body: { email: userEmail, password },
+      socket: { remoteAddress: '127.0.0.1' },
+    }
+    const loginRes = createMockRes()
+    await loginHandler(loginReq, loginRes as any)
+    expect(loginRes.getState().status).toBe(200)
+    const userCookie = cookieHeaderFromSetCookie(loginRes.getState().headers['Set-Cookie'])
+
+    const funcaoId = 'f1'
+    await callProfileApi({
+      method: 'PUT',
+      slug: ['kv'],
+      cookie: adminCookie,
+      body: { key: 'funcoes', value: [{ id: funcaoId, nome: 'Operador', ativo: true }] },
+    })
+    await callProfileApi({
+      method: 'PUT',
+      slug: ['kv'],
+      cookie: adminCookie,
+      body: { key: 'usuarios', value: [{ id: userId, funcao: 'Operador' }] },
+    })
+    const denyAll = { ver: false, criar: false, editar: false, excluir: false }
+    await callProfileApi({
+      method: 'PUT',
+      slug: ['kv'],
+      cookie: adminCookie,
+      body: {
+        key: 'sisteq-rbac',
+        value: {
+          version: 1,
+          updatedAt: new Date().toISOString(),
+          byFuncaoId: {
+            [funcaoId]: {
+              fornecedores: denyAll,
+              documentos: denyAll,
+              processos: denyAll,
+              indicadores: denyAll,
+              'instrumentos-medicao': denyAll,
+              manutencao: denyAll,
+              'recursos-humanos': denyAll,
+            },
+          },
+        },
+      },
+    })
+
+    const deniedKeys = [
+      'fornecedores',
+      'sisteq-docs-clientes',
+      'sisteq-processos',
+      'sisteq_kpi_indicadores',
+      'sisteq-instrumentos',
+      'sisteq-manutencao-os',
+      'sisteq-colaboradores',
+    ]
+    for (const k of deniedKeys) {
+      const forbiddenGet = await callProfileApi({ method: 'GET', slug: ['kv'], cookie: userCookie, query: { key: k } })
+      expect(forbiddenGet.status).toBe(403)
+
+      const forbiddenPut = await callProfileApi({
+        method: 'PUT',
+        slug: ['kv'],
+        cookie: userCookie,
+        body: { key: k, value: [{ id: 'x' }] },
+      })
+      expect(forbiddenPut.status).toBe(403)
+    }
+
+    const adminPut = await callProfileApi({
+      method: 'PUT',
+      slug: ['kv'],
+      cookie: adminCookie,
+      body: { key: 'fornecedores', value: [{ id: 'ok' }] },
+    })
+    expect(adminPut.status).toBe(200)
   })
 })

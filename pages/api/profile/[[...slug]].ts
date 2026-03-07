@@ -1,6 +1,8 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
 import {
   AuthError,
+  assertAdmin,
+  assertRbacAccess,
   changePassword,
   createUserAsAdmin,
   createSupportTicket,
@@ -75,6 +77,104 @@ function sendError(res: NextApiResponse, e: any) {
   res.status(status).json({ error: e?.message || 'Erro interno' })
 }
 
+function safeStringHeader(value: any) {
+  if (typeof value === 'string') return value.trim()
+  if (Array.isArray(value)) return typeof value[0] === 'string' ? value[0].trim() : ''
+  return ''
+}
+
+function moduleIdForKvKey(keyRaw: string, activeModuleId: string): string | null {
+  const key = String(keyRaw ?? '').trim()
+  if (!key) return null
+
+  if (key === 'strategic-planning-data') {
+    if (activeModuleId === 'gestao-riscos' || activeModuleId === 'acoes-corretivas' || activeModuleId === 'gestao-estrategica') {
+      return activeModuleId
+    }
+    return 'gestao-estrategica'
+  }
+
+  if (key === 'strategic-planning-years') return 'gestao-estrategica'
+  if (key === 'sisteq-processos-mapeamento' || key === 'sisteq-processos') return 'processos'
+  if (key === 'sisteq_kpi_indicadores') return 'indicadores'
+
+  if (
+    key === 'sisteq-docs-internos' ||
+    key === 'sisteq-docs-clientes' ||
+    key === 'sisteq-docs-externos' ||
+    key === 'sisteq-docs-licencas' ||
+    key === 'sisteq-docs-certidoes' ||
+    key === 'sisteq-tipos-docs-internos' ||
+    key === 'sisteq-tipos-docs-clientes' ||
+    key === 'sisteq-tipos-externos' ||
+    key === 'sisteq-tipos-licencas' ||
+    key === 'sisteq-tipos-certidoes'
+  ) {
+    return 'documentos'
+  }
+
+  if (
+    key === 'sisteq-colaboradores' ||
+    key === 'sisteq-integracao-colaboradores' ||
+    key === 'sisteq-fichas-integracao' ||
+    key === 'sisteq-config-avaliacao-experiencia' ||
+    key === 'sisteq-configuracao-experiencia' ||
+    key === 'sisteq-configuracao-desempenho' ||
+    key === 'sisteq-descricao-funcoes' ||
+    key === 'sisteq-matriz-atividades' ||
+    key === 'sisteq-matriz-qualificacoes' ||
+    key === 'planos-qualificacao'
+  ) {
+    return 'recursos-humanos'
+  }
+
+  if (
+    key === 'fornecedores' ||
+    key === 'fornecedores_config' ||
+    key === 'fornecedores_rofs' ||
+    key === 'fornecedores_avaliacoes' ||
+    key === 'fornecedores_recebimentos' ||
+    key === 'fornecedores_pedidos'
+  ) {
+    return 'fornecedores'
+  }
+
+  if (key === 'sisteq-instrumentos' || key === 'sisteq-padroes-referencia' || key === 'sisteq-tipos-instrumentos') {
+    return 'instrumentos-medicao'
+  }
+
+  if (
+    key === 'sisteq-manutencao-equipamentos' ||
+    key === 'sisteq-manutencao-os' ||
+    key === 'sisteq-manutencao-planos' ||
+    key === 'sisteq-manutencao-tipos-equipamento'
+  ) {
+    return 'manutencao'
+  }
+
+  return null
+}
+
+function safeParseJson(raw: any) {
+  if (typeof raw !== 'string') return raw
+  try {
+    return JSON.parse(raw)
+  } catch {
+    return null
+  }
+}
+
+function inferActionFromKv(oldValue: any, newValue: any): 'criar' | 'editar' | 'excluir' {
+  const oldParsed = safeParseJson(oldValue)
+  const newParsed = safeParseJson(newValue)
+  if (Array.isArray(oldParsed) && Array.isArray(newParsed)) {
+    if (newParsed.length > oldParsed.length) return 'criar'
+    if (newParsed.length < oldParsed.length) return 'excluir'
+    return 'editar'
+  }
+  return 'editar'
+}
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   try {
     const slug = getSlug(req)
@@ -112,6 +212,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     if (slug.length === 1 && slug[0] === 'preferences') {
+      await assertAdmin(auth.tenantId, auth.userId)
       if (req.method === 'GET') {
         res.status(200).json({ preferences: await getPreferences(auth.tenantId, auth.userId) })
         return
@@ -138,6 +239,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     if (slug.length === 1 && slug[0] === 'notifications') {
+      await assertAdmin(auth.tenantId, auth.userId)
       if (req.method !== 'GET') {
         res.setHeader('Allow', 'GET')
         res.status(405).json({ error: 'Method Not Allowed' })
@@ -148,6 +250,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     if (slug.length === 2 && slug[0] === 'notifications' && slug[1] === 'settings') {
+      await assertAdmin(auth.tenantId, auth.userId)
       if (req.method === 'GET') {
         res.status(200).json({ settings: await getNotificationSettings(auth.tenantId, auth.userId) })
         return
@@ -162,6 +265,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     if (slug.length === 2 && slug[0] === 'notifications' && slug[1] === 'read') {
+      await assertAdmin(auth.tenantId, auth.userId)
       if (req.method !== 'POST') {
         res.setHeader('Allow', 'POST')
         res.status(405).json({ error: 'Method Not Allowed' })
@@ -172,6 +276,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     if (slug.length === 1 && slug[0] === 'privacy') {
+      await assertAdmin(auth.tenantId, auth.userId)
       if (req.method === 'GET') {
         res.status(200).json({ privacy: await getPrivacy(auth.tenantId, auth.userId) })
         return
@@ -186,17 +291,29 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     if (slug.length === 1 && slug[0] === 'kv') {
+      const activeModuleId = safeStringHeader(req.headers['x-sisteq-module-id'])
       if (req.method === 'GET') {
         const key = typeof req.query.key === 'string' ? req.query.key : ''
         if (!key) {
           res.status(400).json({ error: 'key é obrigatória' })
           return
         }
+        if (key === 'sisteq-rbac') await assertAdmin(auth.tenantId, auth.userId)
+        const moduleId = moduleIdForKvKey(key, activeModuleId)
+        if (moduleId) await assertRbacAccess(auth.tenantId, auth.userId, moduleId, 'ver')
         res.status(200).json({ value: await getTenantKvValue(auth.tenantId, key) })
         return
       }
       if (req.method === 'PUT') {
         const body = (req.body ?? {}) as any
+        const key = String(body.key ?? '').trim()
+        if (key === 'sisteq-rbac') await assertAdmin(auth.tenantId, auth.userId)
+        const moduleId = moduleIdForKvKey(key, activeModuleId)
+        if (moduleId) {
+          const prevValue = await getTenantKvValue(auth.tenantId, key)
+          const action = inferActionFromKv(prevValue, body.value)
+          await assertRbacAccess(auth.tenantId, auth.userId, moduleId, action)
+        }
         res.status(200).json(await setTenantKvValue(auth.tenantId, auth.userId, body.key, body.value))
         return
       }
@@ -206,6 +323,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           res.status(400).json({ error: 'key é obrigatória' })
           return
         }
+        if (key === 'sisteq-rbac') await assertAdmin(auth.tenantId, auth.userId)
+        const moduleId = moduleIdForKvKey(key, activeModuleId)
+        if (moduleId) await assertRbacAccess(auth.tenantId, auth.userId, moduleId, 'excluir')
         res.status(200).json(await deleteTenantKvValue(auth.tenantId, auth.userId, key))
         return
       }
@@ -215,21 +335,69 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     if (slug.length === 2 && slug[0] === 'kv' && slug[1] === 'batch') {
+      const activeModuleId = safeStringHeader(req.headers['x-sisteq-module-id'])
       if (req.method === 'POST') {
         const body = (req.body ?? {}) as any
         const keys = Array.isArray(body?.keys) ? body.keys : []
-        res.status(200).json({ values: await getTenantKvValues(auth.tenantId, keys) })
+        const allowedKeys: string[] = []
+        for (const k of keys) {
+          const key = String(k ?? '').trim()
+          if (!key) continue
+          if (key === 'sisteq-rbac') {
+            try {
+              await assertAdmin(auth.tenantId, auth.userId)
+              allowedKeys.push(key)
+            } catch {
+            }
+            continue
+          }
+          const moduleId = moduleIdForKvKey(key, activeModuleId)
+          if (!moduleId) {
+            allowedKeys.push(key)
+            continue
+          }
+          try {
+            await assertRbacAccess(auth.tenantId, auth.userId, moduleId, 'ver')
+            allowedKeys.push(key)
+          } catch {
+          }
+        }
+        res.status(200).json({ values: await getTenantKvValues(auth.tenantId, allowedKeys) })
         return
       }
       if (req.method === 'PUT') {
         const body = (req.body ?? {}) as any
         const items = Array.isArray(body?.items) ? body.items : []
+        for (const item of items) {
+          const key = String(item?.key ?? '').trim()
+          if (!key) continue
+          if (key === 'sisteq-rbac') {
+            await assertAdmin(auth.tenantId, auth.userId)
+            continue
+          }
+          const moduleId = moduleIdForKvKey(key, activeModuleId)
+          if (!moduleId) continue
+          const prevValue = await getTenantKvValue(auth.tenantId, key)
+          const action = inferActionFromKv(prevValue, item?.value)
+          await assertRbacAccess(auth.tenantId, auth.userId, moduleId, action)
+        }
         res.status(200).json(await setTenantKvValues(auth.tenantId, auth.userId, items))
         return
       }
       if (req.method === 'DELETE') {
         const body = (req.body ?? {}) as any
         const keys = Array.isArray(body?.keys) ? body.keys : []
+        for (const k of keys) {
+          const key = String(k ?? '').trim()
+          if (!key) continue
+          if (key === 'sisteq-rbac') {
+            await assertAdmin(auth.tenantId, auth.userId)
+            continue
+          }
+          const moduleId = moduleIdForKvKey(key, activeModuleId)
+          if (!moduleId) continue
+          await assertRbacAccess(auth.tenantId, auth.userId, moduleId, 'excluir')
+        }
         res.status(200).json(await deleteTenantKvValues(auth.tenantId, auth.userId, keys))
         return
       }
@@ -246,7 +414,32 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
       const prefix = typeof req.query.prefix === 'string' ? req.query.prefix : ''
       const limitRaw = typeof req.query.limit === 'string' ? Number(req.query.limit) : undefined
-      res.status(200).json(await listTenantKvKeys(auth.tenantId, { prefix, limit: limitRaw }))
+      const result = await listTenantKvKeys(auth.tenantId, { prefix, limit: limitRaw })
+      const activeModuleId = safeStringHeader(req.headers['x-sisteq-module-id'])
+      const keys = Array.isArray((result as any)?.keys) ? ((result as any).keys as any[]).map(k => String(k)) : []
+      const filtered: string[] = []
+      for (const key of keys) {
+        if (!key) continue
+        if (key === 'sisteq-rbac') {
+          try {
+            await assertAdmin(auth.tenantId, auth.userId)
+            filtered.push(key)
+          } catch {
+          }
+          continue
+        }
+        const moduleId = moduleIdForKvKey(key, activeModuleId)
+        if (!moduleId) {
+          filtered.push(key)
+          continue
+        }
+        try {
+          await assertRbacAccess(auth.tenantId, auth.userId, moduleId, 'ver')
+          filtered.push(key)
+        } catch {
+        }
+      }
+      res.status(200).json({ ...(result as any), keys: filtered })
       return
     }
 
