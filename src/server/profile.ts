@@ -1,11 +1,12 @@
 import crypto from 'crypto'
+import dns from 'dns/promises'
 import path from 'path'
 import { promises as fs } from 'fs'
 import { TextEncoder } from 'util'
 import bcrypt from 'bcryptjs'
 import { SignJWT, jwtVerify } from 'jose'
 import { isDatabaseConfigured, prisma } from '@/server/prisma'
-import { getTenantKvValue } from '@/server/tenant-kv'
+import { getTenantKvValue, setTenantKvValue } from '@/server/tenant-kv'
 
 export type ProfilePreferences = {
   theme: 'system' | 'light' | 'dark'
@@ -283,13 +284,117 @@ function assertNonEmptyString(value: unknown, field: string) {
   }
 }
 
+const EMAIL_MAX_LENGTH = 254
+const EMAIL_LOCAL_MAX_LENGTH = 64
+const EMAIL_DOMAIN_MAX_LENGTH = 253
+const EMAIL_REGEX =
+  /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/
+
 function isEmail(value: string) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
+  const s = value.trim()
+  if (!s || s.length > EMAIL_MAX_LENGTH) return false
+  if (!EMAIL_REGEX.test(s)) return false
+  const at = s.lastIndexOf('@')
+  if (at <= 0) return false
+  const local = s.slice(0, at)
+  const domain = s.slice(at + 1)
+  if (!local || !domain) return false
+  if (local.length > EMAIL_LOCAL_MAX_LENGTH) return false
+  if (domain.length > EMAIL_DOMAIN_MAX_LENGTH) return false
+  return true
 }
 
 function assertValidEmail(value: unknown, field: string) {
   assertNonEmptyString(value, field)
   if (!isEmail(value as string)) throw new ValidationError(`${field} inválido`)
+}
+
+type EmailDomainCacheEntry = { ok: boolean; checkedAtMs: number }
+const emailDomainCache = new Map<string, EmailDomainCacheEntry>()
+const EMAIL_DOMAIN_CACHE_OK_TTL_MS = 6 * 60 * 60 * 1000
+const EMAIL_DOMAIN_CACHE_FAIL_TTL_MS = 60 * 60 * 1000
+
+function emailDomainCheckEnabled() {
+  const raw = typeof process.env.SISTEQ_EMAIL_DOMAIN_CHECK === 'string' ? process.env.SISTEQ_EMAIL_DOMAIN_CHECK.trim() : ''
+  if (raw === '1') return true
+  if (raw === '0') return false
+  return process.env.NODE_ENV === 'production'
+}
+
+function extractEmailDomain(email: string) {
+  const s = email.trim().toLowerCase()
+  const at = s.lastIndexOf('@')
+  if (at < 0) return ''
+  let domain = s.slice(at + 1).trim()
+  if (domain.endsWith('.')) domain = domain.slice(0, -1)
+  return domain
+}
+
+function isTransientDnsError(e: any) {
+  const code = typeof e?.code === 'string' ? e.code : ''
+  const msg = String(e?.message || '')
+  if (code === 'EAI_AGAIN' || code === 'ETIMEDOUT' || code === 'ECONNRESET') return true
+  if (/timeout/i.test(msg)) return true
+  if (/(EAI_AGAIN|ETIMEDOUT|ECONNRESET)/i.test(msg)) return true
+  return false
+}
+
+async function domainHasAnyDnsRecord(domain: string, timeoutMs: number) {
+  const deadline = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(Object.assign(new Error('DNS timeout'), { code: 'ETIMEDOUT' })), timeoutMs),
+  )
+
+  const tryMx = async () => {
+    const mx = (await Promise.race([dns.resolveMx(domain), deadline])) as any
+    return Array.isArray(mx) && mx.length > 0
+  }
+  const tryAorAAAA = async () => {
+    try {
+      const a = (await Promise.race([dns.resolve4(domain), deadline])) as any
+      if (Array.isArray(a) && a.length > 0) return true
+    } catch {}
+    try {
+      const aaaa = (await Promise.race([dns.resolve6(domain), deadline])) as any
+      if (Array.isArray(aaaa) && aaaa.length > 0) return true
+    } catch {}
+    return false
+  }
+
+  try {
+    if (await tryMx()) return { ok: true as const }
+    if (await tryAorAAAA()) return { ok: true as const }
+    return { ok: false as const, transient: false as const, reason: 'DNS sem MX/A/AAAA' }
+  } catch (e: any) {
+    if (isTransientDnsError(e)) return { ok: false as const, transient: true as const, reason: String(e?.message || e) }
+    return { ok: false as const, transient: false as const, reason: String(e?.message || e) }
+  }
+}
+
+async function assertEmailDomainExists(email: string, field: string) {
+  if (!emailDomainCheckEnabled()) return
+  const domain = extractEmailDomain(email)
+  if (!domain) throw new ValidationError(`${field} inválido`)
+
+  const cached = emailDomainCache.get(domain)
+  if (cached) {
+    const ttl = cached.ok ? EMAIL_DOMAIN_CACHE_OK_TTL_MS : EMAIL_DOMAIN_CACHE_FAIL_TTL_MS
+    if (Date.now() - cached.checkedAtMs <= ttl) {
+      if (cached.ok) return
+      throw new ValidationError(`${field} inválido`)
+    }
+  }
+
+  const result = await domainHasAnyDnsRecord(domain, 2_500)
+  if (result.ok) {
+    emailDomainCache.set(domain, { ok: true, checkedAtMs: Date.now() })
+    return
+  }
+
+  emailDomainCache.set(domain, { ok: false, checkedAtMs: Date.now() })
+  if (result.transient) {
+    throw new ValidationError('Não foi possível validar o domínio do e-mail. Tente novamente.')
+  }
+  throw new ValidationError(`${field} inválido`)
 }
 
 function assertBoolean(value: unknown, field: string) {
@@ -567,6 +672,82 @@ function checkAuthRateLimit(key: string) {
   if (current.count >= AUTH_RATE_MAX) throw new AuthError('Muitas tentativas. Aguarde e tente novamente.')
   current.count += 1
   authRate.set(key, current)
+}
+
+type EmailVerificationResendState = {
+  hourCount: number
+  hourResetAtMs: number
+  dayCount: number
+  dayResetAtMs: number
+}
+
+function resendMaxPerHour() {
+  const raw = typeof process.env.SISTEQ_EMAIL_RESEND_MAX_PER_HOUR === 'string' ? process.env.SISTEQ_EMAIL_RESEND_MAX_PER_HOUR.trim() : ''
+  const n = raw ? Number(raw) : NaN
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 5
+}
+
+function resendMaxPerDay() {
+  const raw = typeof process.env.SISTEQ_EMAIL_RESEND_MAX_PER_DAY === 'string' ? process.env.SISTEQ_EMAIL_RESEND_MAX_PER_DAY.trim() : ''
+  const n = raw ? Number(raw) : NaN
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 20
+}
+
+function isValidResendState(value: any): value is EmailVerificationResendState {
+  return (
+    value &&
+    typeof value === 'object' &&
+    typeof value.hourCount === 'number' &&
+    typeof value.hourResetAtMs === 'number' &&
+    typeof value.dayCount === 'number' &&
+    typeof value.dayResetAtMs === 'number'
+  )
+}
+
+async function checkEmailVerificationResendLimit(tenantId: string, email: string, actorUserId: string) {
+  const now = Date.now()
+  const key = `auth:emailVerificationResend:${emailHash(email)}`
+  const existing = await getTenantKvValue<any>(tenantId, key)
+  const maxHour = resendMaxPerHour()
+  const maxDay = resendMaxPerDay()
+
+  const state: EmailVerificationResendState = isValidResendState(existing)
+    ? { ...existing }
+    : { hourCount: 0, hourResetAtMs: 0, dayCount: 0, dayResetAtMs: 0 }
+
+  if (!state.hourResetAtMs || now >= state.hourResetAtMs) {
+    state.hourCount = 0
+    state.hourResetAtMs = now + 60 * 60 * 1000
+  }
+  if (!state.dayResetAtMs || now >= state.dayResetAtMs) {
+    state.dayCount = 0
+    state.dayResetAtMs = now + 24 * 60 * 60 * 1000
+  }
+
+  if (state.hourCount >= maxHour) {
+    audit('auth.email.verification.resend.blocked', {
+      tenantId,
+      userId: actorUserId,
+      scope: 'hour',
+      emailHash: emailHash(email),
+      emailDomain: extractEmailDomain(email),
+    })
+    throw new AuthError('Limite de reenvio excedido. Aguarde e tente novamente.')
+  }
+  if (state.dayCount >= maxDay) {
+    audit('auth.email.verification.resend.blocked', {
+      tenantId,
+      userId: actorUserId,
+      scope: 'day',
+      emailHash: emailHash(email),
+      emailDomain: extractEmailDomain(email),
+    })
+    throw new AuthError('Limite de reenvio excedido. Aguarde e tente novamente.')
+  }
+
+  state.hourCount += 1
+  state.dayCount += 1
+  await setTenantKvValue(tenantId, actorUserId || 'system', key, state)
 }
 
 function hashToken(token: string) {
@@ -1058,6 +1239,7 @@ export async function registerTenantAndUser(payload: {
 
   const tenant = await getOrCreateTenantBySlug(tenantSlug, typeof payload.companyName === 'string' ? payload.companyName : undefined)
   const email = normalizeEmail(String(payload.email))
+  await assertEmailDomainExists(email, 'E-mail')
   const password = String(payload.password)
   assertStrongPassword(password)
 
@@ -1174,7 +1356,14 @@ function verifyCodeHashMatches(code: string, salt: string, expectedHash: string)
 }
 
 export async function createEmailVerificationToken(tenantId: string, userId: string) {
-  return createOneTimeToken('emailVerificationTokens', tenantId, userId, 60 * 60 * 24)
+  const db = await readDb()
+  for (const [id, rec] of Object.entries(db.emailVerificationTokens)) {
+    if (rec.tenantId === tenantId && rec.userId === userId) delete db.emailVerificationTokens[id]
+  }
+  await writeDb(db)
+  const token = await createOneTimeToken('emailVerificationTokens', tenantId, userId, 60 * 60 * 24)
+  audit('auth.email.verification.token.issued', { tenantId, userId })
+  return token
 }
 
 export async function createEmailVerificationCode(tenantId: string, userId: string) {
@@ -1288,14 +1477,21 @@ export async function requestEmailVerification(opts: {
 }) {
   assertValidEmail(opts.email, 'E-mail')
   const email = normalizeEmail(String(opts.email))
+  await assertEmailDomainExists(email, 'E-mail')
   checkAuthRateLimit(opts.rateKey)
 
   const user = await findUserByEmail(opts.tenantId, email)
   if (!user || user.disabledAt) return { ok: true as const, token: null as string | null, alreadyVerified: false as const }
   if (user.emailVerifiedAt) return { ok: true as const, token: null as string | null, alreadyVerified: true as const }
 
-  const token = await createOneTimeToken('emailVerificationTokens', opts.tenantId, user.id, 60 * 60 * 24)
-  audit('auth.email.verification.requested', { tenantId: opts.tenantId, userId: user.id })
+  await checkEmailVerificationResendLimit(opts.tenantId, email, user.id)
+  const token = await createEmailVerificationToken(opts.tenantId, user.id)
+  audit('auth.email.verification.requested', {
+    tenantId: opts.tenantId,
+    userId: user.id,
+    emailHash: emailHash(email),
+    emailDomain: extractEmailDomain(email),
+  })
   return { ok: true as const, token, alreadyVerified: false as const }
 }
 
@@ -1306,14 +1502,21 @@ export async function requestEmailVerificationCode(opts: {
 }) {
   assertValidEmail(opts.email, 'E-mail')
   const email = normalizeEmail(String(opts.email))
+  await assertEmailDomainExists(email, 'E-mail')
   checkAuthRateLimit(opts.rateKey)
 
   const user = await findUserByEmail(opts.tenantId, email)
   if (!user || user.disabledAt) return { ok: true as const, code: null as string | null, expiresAt: null as string | null, alreadyVerified: false as const }
   if (user.emailVerifiedAt) return { ok: true as const, code: null as string | null, expiresAt: null as string | null, alreadyVerified: true as const }
 
+  await checkEmailVerificationResendLimit(opts.tenantId, email, user.id)
   const { code, expiresAt } = await createEmailVerificationCode(opts.tenantId, user.id)
-  audit('auth.email.verification.code.requested', { tenantId: opts.tenantId, userId: user.id })
+  audit('auth.email.verification.code.requested', {
+    tenantId: opts.tenantId,
+    userId: user.id,
+    emailHash: emailHash(email),
+    emailDomain: extractEmailDomain(email),
+  })
   return { ok: true as const, code, expiresAt, alreadyVerified: false as const }
 }
 
@@ -1387,6 +1590,7 @@ export async function createUserAsAdmin(
 
   const name = String(payload.name).trim()
   const email = normalizeEmail(String(payload.email))
+  await assertEmailDomainExists(email, 'E-mail')
   const password = String(payload.password)
   assertStrongPassword(password)
 
@@ -1453,6 +1657,7 @@ export async function updateUserAsAdmin(
 
   if (typeof payload.email !== 'undefined') {
     const nextEmail = normalizeEmail(String(payload.email))
+    await assertEmailDomainExists(nextEmail, 'E-mail')
     const oldEmailKey = userEmailKey(tenantId, user.email)
     const nextEmailKey = userEmailKey(tenantId, nextEmail)
     const existing = db.userByTenantEmail[nextEmailKey]

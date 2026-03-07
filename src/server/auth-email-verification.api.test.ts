@@ -1,10 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import path from 'path'
 import os from 'os'
-import registerHandler from '../../pages/api/auth/register'
-import loginHandler from '../../pages/api/auth/login'
-import verifyEmailHandler from '../../pages/api/auth/verify-email'
-import resendHandler from '../../pages/api/auth/resend-verification'
 
 function createMockRes() {
   const state: { status: number; json: any; headers: Record<string, any>; redirect?: { status: number; url: string } } = {
@@ -57,16 +53,39 @@ function tmpProfileDbPath(prefix: string) {
   return path.join(os.tmpdir(), `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}.json`)
 }
 
+function tmpTenantKvDbPath(prefix: string) {
+  return path.join(os.tmpdir(), `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}.json`)
+}
+
+async function loadHandlers() {
+  const [register, login, verifyEmail, resend] = await Promise.all([
+    import('../../pages/api/auth/register'),
+    import('../../pages/api/auth/login'),
+    import('../../pages/api/auth/verify-email'),
+    import('../../pages/api/auth/resend-verification'),
+  ])
+  return {
+    registerHandler: register.default,
+    loginHandler: login.default,
+    verifyEmailHandler: verifyEmail.default,
+    resendHandler: resend.default,
+  }
+}
+
 describe('Auth email verification flow', () => {
   it('bloqueia login até verificar e permite verificar com código', async () => {
     await withEnv(
       {
         SISTEQ_PROFILE_STORE: 'file',
         SISTEQ_PROFILE_DB_PATH: tmpProfileDbPath('sisteq-auth-email-dev'),
+        SISTEQ_TENANT_KV_DB_PATH: tmpTenantKvDbPath('sisteq-auth-email-dev-kv'),
         SISTEQ_SESSION_SECRET: 'test-secret',
+        SISTEQ_EMAIL_DOMAIN_CHECK: '0',
         DATABASE_URL: undefined,
       },
       async () => {
+        vi.resetModules()
+        const { registerHandler, loginHandler, verifyEmailHandler } = await loadHandlers()
         const tenantSlug = `t-${Date.now()}-${Math.random().toString(16).slice(2)}`
         const email = `user-${Date.now()}-${Math.random()}@example.com`
         const password = 'Senha@12345'
@@ -81,6 +100,8 @@ describe('Auth email verification flow', () => {
         const reg = resRegister.getState()
         expect(reg.status).toBe(201)
         expect(reg.json.ok).toBe(true)
+        expect(reg.json.verificationRequired).toBe(true)
+        expect(reg.json.verificationMethod).toBe('code')
         const code = reg.json?.dev?.verificationCode
         expect(typeof code).toBe('string')
 
@@ -123,10 +144,14 @@ describe('Auth email verification flow', () => {
       {
         SISTEQ_PROFILE_STORE: 'file',
         SISTEQ_PROFILE_DB_PATH: tmpProfileDbPath('sisteq-auth-email-dev-resend'),
+        SISTEQ_TENANT_KV_DB_PATH: tmpTenantKvDbPath('sisteq-auth-email-dev-resend-kv'),
         SISTEQ_SESSION_SECRET: 'test-secret',
+        SISTEQ_EMAIL_DOMAIN_CHECK: '0',
         DATABASE_URL: undefined,
       },
       async () => {
+        vi.resetModules()
+        const { registerHandler, resendHandler, verifyEmailHandler } = await loadHandlers()
         const tenantSlug = `t-${Date.now()}-${Math.random().toString(16).slice(2)}`
         const email = `user-${Date.now()}-${Math.random()}@example.com`
         const password = 'Senha@12345'
@@ -167,12 +192,16 @@ describe('Auth email verification flow', () => {
       {
         SISTEQ_PROFILE_STORE: 'file',
         SISTEQ_PROFILE_DB_PATH: tmpProfileDbPath('sisteq-auth-email-code-errors'),
+        SISTEQ_TENANT_KV_DB_PATH: tmpTenantKvDbPath('sisteq-auth-email-code-errors-kv'),
         SISTEQ_SESSION_SECRET: 'test-secret',
+        SISTEQ_EMAIL_DOMAIN_CHECK: '0',
         DATABASE_URL: undefined,
       },
       async () => {
         vi.useFakeTimers()
         vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'))
+        vi.resetModules()
+        const { registerHandler, verifyEmailHandler } = await loadHandlers()
         const tenantSlug = `t-${Date.now()}-${Math.random().toString(16).slice(2)}`
         const email = `user-${Date.now()}-${Math.random()}@example.com`
         const password = 'Senha@12345'
@@ -231,11 +260,15 @@ describe('Auth email verification flow', () => {
       {
         SISTEQ_PROFILE_STORE: 'file',
         SISTEQ_PROFILE_DB_PATH: tmpProfileDbPath('sisteq-auth-email-code-perf'),
+        SISTEQ_TENANT_KV_DB_PATH: tmpTenantKvDbPath('sisteq-auth-email-code-perf-kv'),
         SISTEQ_SESSION_SECRET: 'test-secret',
+        SISTEQ_EMAIL_DOMAIN_CHECK: '0',
         DATABASE_URL: undefined,
       },
       async () => {
         const start = Date.now()
+        vi.resetModules()
+        const { registerHandler, verifyEmailHandler } = await loadHandlers()
         const tenantSlug = `t-${Date.now()}-${Math.random().toString(16).slice(2)}`
         const email = `user-${Date.now()}-${Math.random()}@example.com`
         const password = 'Senha@12345'
@@ -266,11 +299,16 @@ describe('Auth email verification flow', () => {
       {
         NODE_ENV: 'production',
         SISTEQ_EMAIL_VERIFICATION_MODE: 'token',
+        SISTEQ_ALLOW_FILE_FALLBACK: '1',
         SISTEQ_PROFILE_STORE: 'file',
         SISTEQ_PROFILE_DB_PATH: tmpDbPath,
+        SISTEQ_TENANT_KV_DB_PATH: tmpTenantKvDbPath('sisteq-auth-email-prod-token-kv'),
+        SISTEQ_EMAIL_DOMAIN_CHECK: '0',
         DATABASE_URL: undefined,
       },
       async () => {
+      vi.resetModules()
+      const { registerHandler, loginHandler, verifyEmailHandler } = await loadHandlers()
       const tenantSlug = `t-${Date.now()}-${Math.random().toString(16).slice(2)}`
       const email = `user-${Date.now()}-${Math.random()}@example.com`
       const password = 'Senha@12345'
@@ -315,11 +353,16 @@ describe('Auth email verification flow', () => {
       {
         NODE_ENV: 'production',
         SISTEQ_EMAIL_VERIFICATION_MODE: 'disabled',
+        SISTEQ_ALLOW_FILE_FALLBACK: '1',
         SISTEQ_PROFILE_STORE: 'file',
         SISTEQ_PROFILE_DB_PATH: tmpDbPath,
+        SISTEQ_TENANT_KV_DB_PATH: tmpTenantKvDbPath('sisteq-auth-email-prod-disabled-kv'),
+        SISTEQ_EMAIL_DOMAIN_CHECK: '0',
         DATABASE_URL: undefined,
       },
       async () => {
+      vi.resetModules()
+      const { registerHandler, loginHandler } = await loadHandlers()
       const tenantSlug = `t-${Date.now()}-${Math.random().toString(16).slice(2)}`
       const email = `user-${Date.now()}-${Math.random()}@example.com`
       const password = 'Senha@12345'
@@ -348,4 +391,191 @@ describe('Auth email verification flow', () => {
       },
     )
   }, 15_000)
+
+  it('troca token no reenvio e invalida o token anterior', async () => {
+    const tmpDbPath = path.join(os.tmpdir(), `sisteq-auth-email-prod-token-rotate-${Date.now()}-${Math.random().toString(16).slice(2)}.json`)
+    await withEnv(
+      {
+        NODE_ENV: 'production',
+        SISTEQ_EMAIL_VERIFICATION_MODE: 'token',
+        SISTEQ_ALLOW_FILE_FALLBACK: '1',
+        SISTEQ_PROFILE_STORE: 'file',
+        SISTEQ_PROFILE_DB_PATH: tmpDbPath,
+        SISTEQ_TENANT_KV_DB_PATH: tmpTenantKvDbPath('sisteq-auth-email-prod-token-rotate-kv'),
+        SISTEQ_EMAIL_DOMAIN_CHECK: '0',
+        DATABASE_URL: undefined,
+      },
+      async () => {
+        vi.resetModules()
+        const { registerHandler, resendHandler, verifyEmailHandler } = await loadHandlers()
+        const tenantSlug = `t-${Date.now()}-${Math.random().toString(16).slice(2)}`
+        const email = `user-${Date.now()}-${Math.random()}@example.com`
+        const password = 'Senha@12345'
+
+        const reqRegister: any = {
+          method: 'POST',
+          headers: {},
+          body: { tenantSlug, companyName: 'Empresa', name: 'Admin', email, password },
+        }
+        const resRegister = createMockRes()
+        await registerHandler(reqRegister, resRegister as any)
+        expect(resRegister.getState().status).toBe(201)
+        const url1 = new URL(String(resRegister.getState().json.verificationUrl))
+        const token1 = url1.searchParams.get('token')
+        expect(typeof token1).toBe('string')
+
+        const reqResend: any = {
+          method: 'POST',
+          headers: { 'x-tenant': tenantSlug },
+          body: { email },
+          socket: { remoteAddress: '127.0.0.1' },
+        }
+        const resResend = createMockRes()
+        await resendHandler(reqResend, resResend as any)
+        expect(resResend.getState().status).toBe(200)
+        const url2 = new URL(String(resResend.getState().json.verificationUrl))
+        const token2 = url2.searchParams.get('token')
+        expect(typeof token2).toBe('string')
+        expect(token2).not.toBe(token1)
+
+        const reqVerifyOld: any = { method: 'POST', headers: {}, body: { token: token1 } }
+        const resVerifyOld = createMockRes()
+        await verifyEmailHandler(reqVerifyOld, resVerifyOld as any)
+        expect(resVerifyOld.getState().status).toBe(400)
+        expect(String(resVerifyOld.getState().json?.error || '')).toMatch(/token inválido|token expirado|token já utilizado/i)
+
+        const reqVerifyNew: any = { method: 'POST', headers: {}, body: { token: token2 } }
+        const resVerifyNew = createMockRes()
+        await verifyEmailHandler(reqVerifyNew, resVerifyNew as any)
+        expect(resVerifyNew.getState().status).toBe(200)
+      },
+    )
+  })
+
+  it('bloqueia reenvio quando excede limite por hora', async () => {
+    await withEnv(
+      {
+        SISTEQ_PROFILE_STORE: 'file',
+        SISTEQ_PROFILE_DB_PATH: tmpProfileDbPath('sisteq-auth-email-resend-limit'),
+        SISTEQ_TENANT_KV_DB_PATH: tmpTenantKvDbPath('sisteq-auth-email-resend-limit-kv'),
+        SISTEQ_SESSION_SECRET: 'test-secret',
+        SISTEQ_EMAIL_RESEND_MAX_PER_HOUR: '2',
+        SISTEQ_EMAIL_DOMAIN_CHECK: '0',
+        DATABASE_URL: undefined,
+      },
+      async () => {
+        vi.resetModules()
+        const { registerHandler, resendHandler } = await loadHandlers()
+        const tenantSlug = `t-${Date.now()}-${Math.random().toString(16).slice(2)}`
+        const email = `user-${Date.now()}-${Math.random()}@example.com`
+        const password = 'Senha@12345'
+
+        const reqRegister: any = {
+          method: 'POST',
+          headers: {},
+          body: { tenantSlug, companyName: 'Empresa', name: 'Admin', email, password },
+        }
+        const resRegister = createMockRes()
+        await registerHandler(reqRegister, resRegister as any)
+        expect(resRegister.getState().status).toBe(201)
+
+        const makeReq = () =>
+          ({
+            method: 'POST',
+            headers: { 'x-tenant': tenantSlug },
+            body: { email },
+            socket: { remoteAddress: '127.0.0.1' },
+          }) as any
+
+        const r1 = createMockRes()
+        await resendHandler(makeReq(), r1 as any)
+        expect(r1.getState().status).toBe(200)
+
+        const r2 = createMockRes()
+        await resendHandler(makeReq(), r2 as any)
+        expect(r2.getState().status).toBe(200)
+
+        const r3 = createMockRes()
+        await resendHandler(makeReq(), r3 as any)
+        expect(r3.getState().status).toBe(400)
+        expect(String(r3.getState().json?.error || '')).toMatch(/limite de reenvio excedido/i)
+      },
+    )
+  })
+
+  it('valida domínio do e-mail quando habilitado (domínio inexistente)', async () => {
+    await withEnv(
+      {
+        SISTEQ_PROFILE_STORE: 'file',
+        SISTEQ_PROFILE_DB_PATH: tmpProfileDbPath('sisteq-auth-email-domain-invalid'),
+        SISTEQ_TENANT_KV_DB_PATH: tmpTenantKvDbPath('sisteq-auth-email-domain-invalid-kv'),
+        SISTEQ_SESSION_SECRET: 'test-secret',
+        SISTEQ_EMAIL_DOMAIN_CHECK: '1',
+        DATABASE_URL: undefined,
+      },
+      async () => {
+        vi.resetModules()
+        vi.doMock('dns/promises', () => ({
+          default: {
+            resolveMx: vi.fn().mockResolvedValue([]),
+            resolve4: vi.fn().mockRejectedValue(Object.assign(new Error('ENOTFOUND'), { code: 'ENOTFOUND' })),
+            resolve6: vi.fn().mockRejectedValue(Object.assign(new Error('ENOTFOUND'), { code: 'ENOTFOUND' })),
+          },
+        }))
+        const { registerHandler } = await loadHandlers()
+
+        const tenantSlug = `t-${Date.now()}-${Math.random().toString(16).slice(2)}`
+        const email = `user-${Date.now()}@inexistente.tld`
+        const password = 'Senha@12345'
+
+        const reqRegister: any = {
+          method: 'POST',
+          headers: {},
+          body: { tenantSlug, companyName: 'Empresa', name: 'Admin', email, password },
+        }
+        const resRegister = createMockRes()
+        await registerHandler(reqRegister, resRegister as any)
+        expect(resRegister.getState().status).toBe(400)
+        expect(String(resRegister.getState().json?.error || '')).toMatch(/e-mail inválido/i)
+      },
+    )
+  })
+
+  it('retorna erro amigável quando validação DNS falha transitoriamente', async () => {
+    await withEnv(
+      {
+        SISTEQ_PROFILE_STORE: 'file',
+        SISTEQ_PROFILE_DB_PATH: tmpProfileDbPath('sisteq-auth-email-domain-transient'),
+        SISTEQ_TENANT_KV_DB_PATH: tmpTenantKvDbPath('sisteq-auth-email-domain-transient-kv'),
+        SISTEQ_SESSION_SECRET: 'test-secret',
+        SISTEQ_EMAIL_DOMAIN_CHECK: '1',
+        DATABASE_URL: undefined,
+      },
+      async () => {
+        vi.resetModules()
+        vi.doMock('dns/promises', () => ({
+          default: {
+            resolveMx: vi.fn().mockRejectedValue(Object.assign(new Error('EAI_AGAIN'), { code: 'EAI_AGAIN' })),
+            resolve4: vi.fn(),
+            resolve6: vi.fn(),
+          },
+        }))
+        const { registerHandler } = await loadHandlers()
+
+        const tenantSlug = `t-${Date.now()}-${Math.random().toString(16).slice(2)}`
+        const email = `user-${Date.now()}@example.com`
+        const password = 'Senha@12345'
+
+        const reqRegister: any = {
+          method: 'POST',
+          headers: {},
+          body: { tenantSlug, companyName: 'Empresa', name: 'Admin', email, password },
+        }
+        const resRegister = createMockRes()
+        await registerHandler(reqRegister, resRegister as any)
+        expect(resRegister.getState().status).toBe(400)
+        expect(String(resRegister.getState().json?.error || '')).toMatch(/não foi possível validar o domínio/i)
+      },
+    )
+  })
 })

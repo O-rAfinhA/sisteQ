@@ -232,19 +232,14 @@ export default function Login() {
 
       const verificationCode = result?.dev?.verificationCode;
       if (verificationCode) {
-        trackEvent('signup_success', { next, mode: 'dev_auto_verify' });
-        await apiJson<{ ok: true }>('/api/auth/verify-email', {
-          method: 'POST',
-          body: JSON.stringify({ email, code: verificationCode }),
-          headers: authHeaders,
-        });
-        await apiJson<{ user: any }>('/api/auth/login', {
-          method: 'POST',
-          body: JSON.stringify({ email, password }),
-          headers: authHeaders,
-        });
-        await hydrateTenantScope();
-        navigate(next, { replace: true });
+        trackEvent('signup_success', { next, mode: 'email_verification_code_required_dev' });
+        toast.success('Conta criada. Digite o código de verificação para ativar o acesso.');
+        setMode('login');
+        setShowVerify(true);
+        setShowResend(true);
+        setVerificationCode(String(verificationCode));
+        setPassword('');
+        setConfirmPassword('');
         return;
       }
 

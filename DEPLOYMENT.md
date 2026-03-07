@@ -47,6 +47,21 @@ Opcionais (dependem de features):
     - `required` (padrão): envia e-mail de verificação e bloqueia login até confirmar
     - `token`: não envia e-mail, mas retorna URL de verificação para consumo por outro canal
     - `disabled`: auto-verifica no cadastro (útil para ambientes controlados, staging e desenvolvimento)
+  - Envio via SMTP (quando `required`):
+    - `SISTEQ_EMAIL_FROM` (ex.: `SisteQ <no-reply@seu-dominio.com>`)
+    - `SISTEQ_SMTP_HOST`, `SISTEQ_SMTP_PORT` (ex.: 587), `SISTEQ_SMTP_SECURE` (0/1; padrão: 1 quando porta 465)
+    - `SISTEQ_SMTP_USER`, `SISTEQ_SMTP_PASS` (quando autenticação é exigida)
+    - `SISTEQ_SMTP_REQUIRE_TLS` (0/1, opcional), `SISTEQ_SMTP_TLS_REJECT_UNAUTHORIZED` (0/1; padrão: 1)
+    - `SISTEQ_SMTP_CONN_TIMEOUT_MS`, `SISTEQ_SMTP_GREETING_TIMEOUT_MS`, `SISTEQ_SMTP_SOCKET_TIMEOUT_MS` (opcional)
+  - Validação de e-mail:
+    - `SISTEQ_EMAIL_DOMAIN_CHECK` (0/1; padrão: 1 em produção, 0 fora de produção)
+  - Limites de reenvio:
+    - `SISTEQ_EMAIL_RESEND_MAX_PER_HOUR` (padrão: 5)
+    - `SISTEQ_EMAIL_RESEND_MAX_PER_DAY` (padrão: 20)
+  - Segurança do código de verificação:
+    - `SISTEQ_EMAIL_VERIFICATION_PEPPER` (recomendado; string secreta usada no hash do código)
+  - Privacidade (LGPD/GDPR):
+    - Logs de auditoria não registram token/senha e usam hash do e-mail em eventos de reenvio
 - Google OAuth:
   - `SISTEQ_GOOGLE_CLIENT_ID`
   - `SISTEQ_GOOGLE_CLIENT_SECRET`

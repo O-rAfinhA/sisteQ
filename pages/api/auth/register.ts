@@ -44,6 +44,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (mode === 'disabled') {
       const token = await createEmailVerificationToken(tenant.id, user.id)
       await verifyEmailByToken(token)
+      console.info(
+        JSON.stringify({
+          ts: new Date().toISOString(),
+          level: 'info',
+          scope: 'auth',
+          event: 'auth.register.completed',
+          mode,
+          tenantId: tenant.id,
+          userId: user.id,
+          emailVerified: true,
+        }),
+      )
       res.status(201).json({ ok: true, emailVerified: true })
       return
     }
@@ -55,13 +67,41 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const verificationUrl = `${proto}://${host}/api/auth/verify-email?token=${encodeURIComponent(token)}&tenant=${encodeURIComponent(
         tenant.slug,
       )}`
-      res.status(201).json({ ok: true, emailSent: false, verificationUrl })
+      console.info(
+        JSON.stringify({
+          ts: new Date().toISOString(),
+          level: 'info',
+          scope: 'auth',
+          event: 'auth.register.verification_required',
+          mode,
+          tenantId: tenant.id,
+          userId: user.id,
+          verificationMethod: 'token',
+        }),
+      )
+      res.status(201).json({ ok: true, emailSent: false, verificationUrl, verificationRequired: true, verificationMethod: 'token' })
       return
     }
 
     const issued = await createEmailVerificationCode(tenant.id, user.id)
     if (process.env.NODE_ENV !== 'production') {
-      res.status(201).json({ ok: true, dev: { verificationCode: issued.code } })
+      console.info(
+        JSON.stringify({
+          ts: new Date().toISOString(),
+          level: 'info',
+          scope: 'auth',
+          event: 'auth.register.verification_required',
+          mode,
+          tenantId: tenant.id,
+          userId: user.id,
+          verificationMethod: 'code',
+          emailSent: false,
+          env: process.env.NODE_ENV || '',
+        }),
+      )
+      res
+        .status(201)
+        .json({ ok: true, emailSent: false, verificationRequired: true, verificationMethod: 'code', dev: { verificationCode: issued.code } })
       return
     }
 
@@ -85,6 +125,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       )
     }
 
+    console.info(
+      JSON.stringify({
+        ts: new Date().toISOString(),
+        level: 'info',
+        scope: 'auth',
+        event: 'auth.register.verification_required',
+        mode,
+        tenantId: tenant.id,
+        userId: user.id,
+        verificationMethod: 'code',
+        emailSent,
+      }),
+    )
     res.status(201).json({ ok: true, emailSent, verificationRequired: true, verificationMethod: 'code' })
   } catch (e: any) {
     if (e instanceof AuthError) {
