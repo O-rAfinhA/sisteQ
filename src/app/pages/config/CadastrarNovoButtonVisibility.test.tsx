@@ -58,6 +58,31 @@ describe('Visibilidade do botão de cadastro', () => {
     expect(screen.getAllByRole('button', { name: /novo cadastro/i })).toHaveLength(1);
   });
 
+  it('Usuários: mantém alinhamento vertical ao exibir erro e foco', async () => {
+    render(<Usuarios />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getAllByRole('button', { name: /novo cadastro/i })[0]);
+
+    const nome = screen.getByLabelText(/nome do usuário/i);
+    const email = screen.getByLabelText(/e-mail/i);
+    const role = screen.getByLabelText(/^role/i);
+
+    expect(nome).toHaveClass('w-full');
+    expect(email).toHaveClass('w-full');
+    expect(role).toHaveClass('w-full');
+
+    await user.click(nome);
+    await user.tab();
+    expect(screen.getByText(/informe o nome do usuário/i)).toBeInTheDocument();
+    expect(screen.getByText(/informe o nome do usuário/i)).toHaveClass('min-h-5');
+
+    await user.type(email, 'invalido');
+    await user.tab();
+    expect(screen.getByText(/informe um e-mail válido/i)).toBeInTheDocument();
+    expect(screen.getByText(/informe um e-mail válido/i)).toHaveClass('min-h-5');
+  });
+
   it('Usuários: oculta "Novo Cadastro" durante edição e restaura ao cancelar', async () => {
     window.localStorage.setItem(
       'usuarios',
@@ -169,4 +194,3 @@ describe('Visibilidade do botão de cadastro', () => {
     expect(screen.getAllByRole('button', { name: /nova função/i })).toHaveLength(1);
   });
 });
-

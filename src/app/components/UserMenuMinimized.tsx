@@ -12,7 +12,7 @@ import {
 } from './ui/dropdown-menu';
 import { Badge } from './ui/badge';
 import { toast } from 'sonner';
-import { resetApplication } from '../utils/helpers';
+import { formatRoleWithOrganization, resetApplication, setUserRoleToSession } from '../utils/helpers';
 
 interface UserMenuMinimizedProps {
   onOpenChange?: (open: boolean) => void;
@@ -24,6 +24,8 @@ type UserState = {
   name: string;
   email: string;
   role: string;
+  organizationName: string;
+  language: 'pt-BR' | 'en-US';
   avatarUrl: string | null;
   notifications: number;
 };
@@ -40,6 +42,8 @@ export function UserMenuMinimized({
     name: '',
     email: '',
     role: '',
+    organizationName: '',
+    language: 'pt-BR',
     avatarUrl: null,
     notifications: 0,
   });
@@ -69,11 +73,14 @@ export function UserMenuMinimized({
           throw new Error(meData?.error || 'Falha ao carregar usuário');
         }
         if (cancelled) return;
+        setUserRoleToSession(typeof meData?.user?.role === 'string' ? meData.user.role : null);
         setUser(prev => {
           const next = {
             name: meData?.user?.name ?? prev.name,
             email: meData?.user?.email ?? prev.email,
             role: meData?.user?.role ?? prev.role,
+            organizationName: meData?.user?.organizationName ?? prev.organizationName,
+            language: meData?.user?.preferences?.language === 'en-US' ? 'en-US' : 'pt-BR',
             avatarUrl: meData?.user?.avatarUrl ?? prev.avatarUrl,
             notifications: 0,
           } satisfies UserState;
@@ -268,8 +275,12 @@ export function UserMenuMinimized({
               <p className="truncate text-sm font-medium leading-5 text-foreground">{title}</p>
               {!!user.email && <p className="truncate text-xs leading-4 text-muted-foreground">{user.email}</p>}
               {!!user.role && (
-                <Badge variant="secondary" className="mt-1 text-xs">
-                  {user.role}
+                <Badge variant="secondary" className="mt-1 text-xs whitespace-normal break-words">
+                  {formatRoleWithOrganization({
+                    role: user.role,
+                    organizationName: user.organizationName,
+                    language: user.language,
+                  })}
                 </Badge>
               )}
             </div>

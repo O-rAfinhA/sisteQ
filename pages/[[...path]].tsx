@@ -225,6 +225,14 @@ export const getServerSideProps: GetServerSideProps<{
 
   const fullPath = `${pathname}${toQueryString(searchParams)}`
   const reqForAuth = { headers: context.req.headers as any, method: 'GET' } as any
+  const adminOnlyRouteKeys = new Set([
+    'Usuarios',
+    'Departamentos',
+    'Funcoes',
+    'TiposDocumentos',
+    'DesignSystemV2',
+    'LayoutBaseV2',
+  ])
 
   if (match.routeKey !== 'Login' && match.routeKey !== 'Landing') {
     try {
@@ -240,6 +248,15 @@ export const getServerSideProps: GetServerSideProps<{
               permanent: false,
             },
           }
+        }
+      }
+
+      if (adminOnlyRouteKeys.has(match.routeKey) && auth.role !== 'Admin') {
+        return {
+          redirect: {
+            destination: buildCompanyPath(auth.tenantId, '/gestao-estrategica'),
+            permanent: false,
+          },
         }
       }
 

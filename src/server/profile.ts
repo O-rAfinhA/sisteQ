@@ -1148,6 +1148,10 @@ function publicUser(u: UserProfile) {
   }
 }
 
+function publicMeUser(u: UserProfile, tenant: Tenant | null) {
+  return { ...publicUser(u), organizationName: tenant?.name || '' }
+}
+
 export async function listUsersAsAdmin(tenantId: string, actorUserId: string) {
   await assertAdmin(tenantId, actorUserId)
   const db = await readDb()
@@ -2000,7 +2004,8 @@ async function mutateUser(tenantId: string, userId: string, mutator: (u: UserPro
 
 export async function getMe(tenantId: string, userId: string) {
   const user = await getUserById(tenantId, userId)
-  return publicUser(user)
+  const tenant = await getTenantById(tenantId)
+  return publicMeUser(user, tenant)
 }
 
 export async function updateMe(
@@ -2049,7 +2054,8 @@ export async function updateMe(
   db.users[key] = user
   await writeDb(db)
 
-  return publicUser(user)
+  const tenant = await getTenantById(tenantId)
+  return publicMeUser(user, tenant)
 }
 
 export async function changePassword(

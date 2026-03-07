@@ -111,6 +111,7 @@ describe('Profile API', () => {
     const { status, json } = res.getState()
     expect(status).toBe(200)
     expect(json.user.email).toMatch(/@/)
+    expect(json.user.organizationName).toBe('ACME')
   }, 20_000)
 
   it('bloqueia acesso quando x-company-id não bate com o tenant do token', async () => {

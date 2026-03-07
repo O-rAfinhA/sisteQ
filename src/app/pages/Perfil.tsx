@@ -18,7 +18,7 @@ import {
   AlertDialogTitle,
 } from '../components/ui/alert-dialog'
 import { toast } from 'sonner'
-import { resetApplication } from '../utils/helpers'
+import { formatRoleWithOrganization, resetApplication } from '../utils/helpers'
 
 type ProfilePreferences = {
   theme: 'system' | 'light' | 'dark'
@@ -66,6 +66,7 @@ type PublicUser = {
   name: string
   email: string
   role: string
+  organizationName?: string
   avatarUrl: string
   phone?: string
   department?: string
@@ -452,7 +453,13 @@ export function Perfil() {
             />
             <div className="text-right">
               <div className="text-sm font-semibold text-gray-900 leading-tight">{user.name}</div>
-              <div className="text-xs text-gray-500 leading-tight">{user.role}</div>
+              <div className="text-xs text-gray-500 leading-tight whitespace-normal break-words">
+                {formatRoleWithOrganization({
+                  role: user.role,
+                  organizationName: user.organizationName,
+                  language: user.preferences?.language,
+                })}
+              </div>
             </div>
           </div>
         )}

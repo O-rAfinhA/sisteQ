@@ -66,6 +66,30 @@ export function Usuarios() {
     perfil: 'restrito',
     ativo: true
   });
+  const [liveFormErrors, setLiveFormErrors] = useState<Partial<Record<'nome' | 'email' | 'perfil', string>>>({});
+
+  const validateCoreForm = (next = formData) => {
+    const errors: Partial<Record<'nome' | 'email' | 'perfil', string>> = {};
+    const nome = next.nome?.trim() ?? '';
+    const email = next.email?.trim() ?? '';
+
+    if (!nome) errors.nome = 'Informe o nome do usuário.';
+
+    if (!email) errors.email = 'Informe o e-mail.';
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.email = 'Informe um e-mail válido.';
+
+    if (next.tipo === 'sistema') {
+      if (!next.perfil) errors.perfil = 'Selecione a role.';
+    }
+
+    return errors;
+  };
+
+  const validateField = (field: 'nome' | 'email' | 'perfil') => {
+    const errors = validateCoreForm();
+    setLiveFormErrors(prev => ({ ...prev, [field]: errors[field] }));
+    return errors;
+  };
 
   // Carregar dados do localStorage
   useEffect(() => {
@@ -79,10 +103,9 @@ export function Usuarios() {
   }, []);
 
   const handleAdd = async () => {
-    if (!formData.nome || !formData.email) {
-      alert('Por favor, preencha pelo menos Nome e E-mail');
-      return;
-    }
+    const errors = validateCoreForm();
+    setLiveFormErrors(errors);
+    if (Object.keys(errors).length > 0) return;
 
     if (formData.tipo === 'sistema') {
       if (!password) {
@@ -149,10 +172,9 @@ export function Usuarios() {
   };
 
   const handleUpdate = () => {
-    if (!formData.nome || !formData.email) {
-      alert('Por favor, preencha pelo menos Nome e E-mail');
-      return;
-    }
+    const errors = validateCoreForm();
+    setLiveFormErrors(errors);
+    if (Object.keys(errors).length > 0) return;
 
     const updated = usuarios.map(usuario =>
       usuario.id === editingId
@@ -181,6 +203,7 @@ export function Usuarios() {
       perfil: 'restrito',
       ativo: true
     });
+    setLiveFormErrors({});
     setPassword('');
     setShowPassword(false);
   };
@@ -291,94 +314,153 @@ export function Usuarios() {
               {editingId ? 'Editar Cadastro' : 'Novo Cadastro'}
             </h3>
             
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Nome Completo *
-                </label>
-                <input
-                  type="text"
-                  value={formData.nome}
-                  onChange={(e) => setFormData({ ...formData, nome: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
-                  placeholder="Nome completo"
-                />
+            <div className="space-y-4 mb-4">
+              <div className="grid grid-cols-1 gap-4">
+                <div className="grid grid-rows-[auto_auto_1.25rem] gap-1">
+                  <label htmlFor="usuario-nome" className="block text-sm font-medium text-gray-700">
+                    Nome do usuário *
+                  </label>
+                  <input
+                    id="usuario-nome"
+                    type="text"
+                    value={formData.nome}
+                    onBlur={() => validateField('nome')}
+                    onChange={(e) => {
+                      setFormData({ ...formData, nome: e.target.value });
+                      if (liveFormErrors.nome) setLiveFormErrors(prev => ({ ...prev, nome: undefined }));
+                    }}
+                    aria-invalid={!!liveFormErrors.nome}
+                    aria-describedby="usuario-nome-error"
+                    className={`w-full px-3 py-2 border rounded-lg focus:ring-1 focus:outline-none ${
+                      liveFormErrors.nome
+                        ? 'border-red-500 focus:border-red-500 focus:ring-red-500'
+                        : 'border-gray-200 focus:border-blue-500 focus:ring-blue-500'
+                    }`}
+                    placeholder="Nome completo"
+                  />
+                  <div id="usuario-nome-error" className="text-xs text-red-600 min-h-5 leading-5">
+                    {liveFormErrors.nome ?? '\u00A0'}
+                  </div>
+                </div>
+
+                <div className="grid grid-rows-[auto_auto_1.25rem] gap-1">
+                  <label htmlFor="usuario-email" className="block text-sm font-medium text-gray-700">
+                    E-mail *
+                  </label>
+                  <input
+                    id="usuario-email"
+                    type="email"
+                    value={formData.email}
+                    onBlur={() => validateField('email')}
+                    onChange={(e) => {
+                      setFormData({ ...formData, email: e.target.value });
+                      if (liveFormErrors.email) setLiveFormErrors(prev => ({ ...prev, email: undefined }));
+                    }}
+                    aria-invalid={!!liveFormErrors.email}
+                    aria-describedby="usuario-email-error"
+                    className={`w-full px-3 py-2 border rounded-lg focus:ring-1 focus:outline-none ${
+                      liveFormErrors.email
+                        ? 'border-red-500 focus:border-red-500 focus:ring-red-500'
+                        : 'border-gray-200 focus:border-blue-500 focus:ring-blue-500'
+                    }`}
+                    placeholder="email@exemplo.com"
+                  />
+                  <div id="usuario-email-error" className="text-xs text-red-600 min-h-5 leading-5">
+                    {liveFormErrors.email ?? '\u00A0'}
+                  </div>
+                </div>
+
+                <div className="grid grid-rows-[auto_auto_1.25rem] gap-1">
+                  <label htmlFor="usuario-role" className="block text-sm font-medium text-gray-700">
+                    Role {formData.tipo === 'sistema' ? '*' : ''}
+                  </label>
+                  {formData.tipo === 'sistema' ? (
+                    <select
+                      id="usuario-role"
+                      value={formData.perfil}
+                      onBlur={() => validateField('perfil')}
+                      onChange={(e) => {
+                        setFormData({ ...formData, perfil: e.target.value as 'master' | 'restrito' });
+                        if (liveFormErrors.perfil) setLiveFormErrors(prev => ({ ...prev, perfil: undefined }));
+                      }}
+                      aria-invalid={!!liveFormErrors.perfil}
+                      aria-describedby="usuario-role-error"
+                      className={`w-full px-3 py-2 border rounded-lg focus:ring-1 focus:outline-none ${
+                        liveFormErrors.perfil
+                          ? 'border-red-500 focus:border-red-500 focus:ring-red-500'
+                          : 'border-gray-200 focus:border-blue-500 focus:ring-blue-500'
+                      }`}
+                    >
+                      <option value="master">Master (Acesso Total)</option>
+                      <option value="restrito">Restrito (Apenas suas tarefas)</option>
+                    </select>
+                  ) : (
+                    <select
+                      id="usuario-role"
+                      value=""
+                      disabled
+                      className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 text-gray-500"
+                    >
+                      <option value="">N/A</option>
+                    </select>
+                  )}
+                  <div id="usuario-role-error" className="text-xs text-red-600 min-h-5 leading-5">
+                    {formData.tipo === 'sistema' ? (liveFormErrors.perfil ?? '\u00A0') : '\u00A0'}
+                  </div>
+                </div>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  E-mail *
-                </label>
-                <input
-                  type="email"
-                  value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
-                  placeholder="email@exemplo.com"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Departamento
-                </label>
-                <select
-                  value={formData.departamento}
-                  onChange={(e) => setFormData({ ...formData, departamento: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
-                >
-                  <option value="">Selecione um departamento</option>
-                  {departamentos.map(dep => (
-                    <option key={dep} value={dep}>{dep}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Função
-                </label>
-                <select
-                  value={formData.funcao}
-                  onChange={(e) => setFormData({ ...formData, funcao: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
-                >
-                  <option value="">Selecione uma função</option>
-                  {funcoes.map(func => (
-                    <option key={func} value={func}>{func}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Tipo *
-                </label>
-                <select
-                  value={formData.tipo}
-                  onChange={(e) => setFormData({ ...formData, tipo: e.target.value as 'sistema' | 'pessoa' })}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
-                >
-                  <option value="sistema">Usuário do Sistema</option>
-                  <option value="pessoa">Pessoa Cadastrada</option>
-                </select>
-              </div>
-
-              {formData.tipo === 'sistema' && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Perfil de Acesso *
+                    Departamento
                   </label>
                   <select
-                    value={formData.perfil}
-                    onChange={(e) => setFormData({ ...formData, perfil: e.target.value as 'master' | 'restrito' })}
+                    value={formData.departamento}
+                    onChange={(e) => setFormData({ ...formData, departamento: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
                   >
-                    <option value="master">Master (Acesso Total)</option>
-                    <option value="restrito">Restrito (Apenas suas tarefas)</option>
+                    <option value="">Selecione um departamento</option>
+                    {departamentos.map(dep => (
+                      <option key={dep} value={dep}>{dep}</option>
+                    ))}
                   </select>
                 </div>
-              )}
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Função
+                  </label>
+                  <select
+                    value={formData.funcao}
+                    onChange={(e) => setFormData({ ...formData, funcao: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+                  >
+                    <option value="">Selecione uma função</option>
+                    {funcoes.map(func => (
+                      <option key={func} value={func}>{func}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Tipo *
+                  </label>
+                  <select
+                    value={formData.tipo}
+                    onChange={(e) => {
+                      const nextTipo = e.target.value as 'sistema' | 'pessoa';
+                      setFormData({ ...formData, tipo: nextTipo });
+                      if (liveFormErrors.perfil) setLiveFormErrors(prev => ({ ...prev, perfil: undefined }));
+                    }}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+                  >
+                    <option value="sistema">Usuário do Sistema</option>
+                    <option value="pessoa">Pessoa Cadastrada</option>
+                  </select>
+                </div>
+              </div>
 
               {formData.tipo === 'sistema' && !editingId && (
                 <div className="md:col-span-2">

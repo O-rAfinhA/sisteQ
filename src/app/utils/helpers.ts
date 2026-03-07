@@ -70,6 +70,32 @@ export function slugify(str: string): string {
     .trim();
 }
 
+export function formatRoleLabel(role: string, language: 'pt-BR' | 'en-US' = 'pt-BR'): string {
+  const raw = String(role ?? '').trim();
+  if (!raw) return '';
+  const lang = language === 'en-US' ? 'en-US' : 'pt-BR';
+
+  if (raw === 'Admin' || raw === 'Administrador' || raw === 'Administrator') {
+    return lang === 'en-US' ? 'Administrator' : 'Administrador';
+  }
+  if (raw === 'User' || raw === 'Usuário' || raw === 'Usuario') {
+    return lang === 'en-US' ? 'User' : 'Usuário';
+  }
+  return raw;
+}
+
+export function formatRoleWithOrganization(opts: {
+  role: string;
+  organizationName?: string | null;
+  language?: 'pt-BR' | 'en-US' | null;
+}): string {
+  const roleLabel = formatRoleLabel(opts.role, opts.language === 'en-US' ? 'en-US' : 'pt-BR');
+  const org = String(opts.organizationName ?? '').trim();
+  if (!org) return roleLabel;
+  if (!roleLabel) return org;
+  return `${roleLabel} - ${org}`;
+}
+
 // ============ DATE HELPERS ============
 
 /**
@@ -308,6 +334,7 @@ export async function persistKvKeyNow(key: string): Promise<{ ok: boolean; statu
 }
 
 const TENANT_ID_SESSION_KEY = 'sisteq:tenantId';
+const USER_ROLE_SESSION_KEY = 'sisteq:userRole';
 const TENANT_SHIM_KEY = '__SISTEQ_TENANT_SHIM__';
 const LEGACY_OWNER_TENANT_KEY = '__SISTEQ_LEGACY_OWNER_TENANT__';
 const FETCH_SHIM_KEY = '__SISTEQ_FETCH_SHIM__';
@@ -490,6 +517,26 @@ export function setTenantIdToSession(tenantId: string | null) {
     return;
   }
   storageSafeSet(ss, TENANT_ID_SESSION_KEY, tenantId);
+}
+
+export function getUserRoleFromSession(): string | null {
+  if (typeof window === 'undefined') return null;
+  const ss: any = (window as any).sessionStorage;
+  if (!ss || typeof ss.getItem !== 'function') return null;
+  const raw = storageSafeGet(ss, USER_ROLE_SESSION_KEY);
+  if (typeof raw !== 'string' || !raw.trim()) return null;
+  return raw.trim();
+}
+
+export function setUserRoleToSession(role: string | null) {
+  if (typeof window === 'undefined') return;
+  const ss: any = (window as any).sessionStorage;
+  if (!ss) return;
+  if (!role) {
+    storageSafeRemove(ss, USER_ROLE_SESSION_KEY);
+    return;
+  }
+  storageSafeSet(ss, USER_ROLE_SESSION_KEY, role);
 }
 
 export function clearTenantSession() {

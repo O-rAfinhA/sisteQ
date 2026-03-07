@@ -12,12 +12,14 @@ import {
 } from './ui/dropdown-menu';
 import { Badge } from './ui/badge';
 import { toast } from 'sonner';
-import { resetApplication } from '../utils/helpers';
+import { formatRoleWithOrganization, resetApplication, setUserRoleToSession } from '../utils/helpers';
 
 type UserState = {
   name: string;
   email: string;
   role: string;
+  organizationName: string;
+  language: 'pt-BR' | 'en-US';
   avatarUrl: string | null;
   notifications: number;
 };
@@ -28,6 +30,8 @@ export function UserMenu() {
     name: '',
     email: '',
     role: '',
+    organizationName: '',
+    language: 'pt-BR',
     avatarUrl: null,
     notifications: 0,
   });
@@ -67,11 +71,14 @@ export function UserMenu() {
           throw new Error(meData?.error || 'Falha ao carregar usuário');
         }
         if (cancelled) return;
+        setUserRoleToSession(typeof meData?.user?.role === 'string' ? meData.user.role : null);
         setUser(prev => {
           const next = {
             name: meData?.user?.name ?? prev.name,
             email: meData?.user?.email ?? prev.email,
             role: meData?.user?.role ?? prev.role,
+            organizationName: meData?.user?.organizationName ?? prev.organizationName,
+            language: meData?.user?.preferences?.language === 'en-US' ? 'en-US' : 'pt-BR',
             avatarUrl: meData?.user?.avatarUrl ?? prev.avatarUrl,
             notifications: prev.notifications,
           } satisfies UserState;
@@ -133,7 +140,15 @@ export function UserMenu() {
           {/* Informações do Usuário */}
           <div className="hidden md:flex flex-col items-start">
             <span className="text-sm font-semibold text-gray-900">{title}</span>
-            {!!user.role && <span className="text-xs text-gray-500">{user.role}</span>}
+            {!!user.role && (
+              <span className="text-xs text-gray-500 whitespace-normal break-words">
+                {formatRoleWithOrganization({
+                  role: user.role,
+                  organizationName: user.organizationName,
+                  language: user.language,
+                })}
+              </span>
+            )}
           </div>
 
           {/* Ícone de dropdown */}
@@ -160,8 +175,12 @@ export function UserMenu() {
               <p className="text-sm font-semibold text-gray-900 truncate">{title}</p>
               {!!user.email && <p className="text-xs text-gray-500 truncate">{user.email}</p>}
               {!!user.role && (
-                <Badge variant="secondary" className="mt-1 text-xs bg-blue-100 text-blue-700">
-                  {user.role}
+                <Badge variant="secondary" className="mt-1 text-xs bg-blue-100 text-blue-700 whitespace-normal break-words">
+                  {formatRoleWithOrganization({
+                    role: user.role,
+                    organizationName: user.organizationName,
+                    language: user.language,
+                  })}
                 </Badge>
               )}
             </div>

@@ -49,8 +49,17 @@ vi.mock('../hooks/useFornecedores', () => ({
 }));
 
 describe('TopMenu (menu de perfil)', () => {
+  let meRole = 'Admin';
+  let meLanguage: 'pt-BR' | 'en-US' = 'pt-BR';
+
   beforeEach(() => {
     navigateMock.mockReset();
+    meRole = 'Admin';
+    meLanguage = 'pt-BR';
+    try {
+      window.sessionStorage?.clear?.();
+    } catch {
+    }
 
     const makeRes = (status: number, body: any) =>
       ({
@@ -68,8 +77,10 @@ describe('TopMenu (menu de perfil)', () => {
           user: {
             name: 'João Silva',
             email: 'joao.silva@empresa.com.br',
-            role: 'Administrador',
+            role: meRole,
+            organizationName: 'ACME',
             avatarUrl: null,
+            preferences: { language: meLanguage },
           },
         });
       }
@@ -138,7 +149,7 @@ describe('TopMenu (menu de perfil)', () => {
       .closest('[data-slot="dropdown-menu-content"]') as HTMLElement | null;
     expect(menuContent).not.toBeNull();
 
-    expect(await within(menuContent!).findByText(/administrador/i)).toBeInTheDocument();
+    expect(await within(menuContent!).findByText(/administrador\s*-\s*acme/i)).toBeInTheDocument();
 
     fireEvent.mouseLeave(profileTrigger);
     fireEvent.mouseEnter(menuContent!);
@@ -146,6 +157,32 @@ describe('TopMenu (menu de perfil)', () => {
     await new Promise(r => setTimeout(r, 350));
 
     expect(screen.getByText(/meu perfil/i)).toBeInTheDocument();
+  });
+
+  it('exibe label em inglês quando language=en-US', async () => {
+    meLanguage = 'en-US';
+    const { container } = render(
+      <TopMenu activeModule={undefined} onModuleChange={vi.fn()} />,
+    );
+
+    fireEvent.mouseEnter(container.firstElementChild!);
+
+    const profileTrigger = screen.getByRole('button', { name: /conta/i });
+    await waitFor(() => {
+      expect(profileTrigger).not.toBeDisabled();
+    });
+    fireEvent.mouseEnter(profileTrigger);
+
+    await waitFor(() => {
+      expect(screen.getByText(/meu perfil/i)).toBeInTheDocument();
+    });
+
+    const menuContent = screen
+      .getByText(/meu perfil/i)
+      .closest('[data-slot="dropdown-menu-content"]') as HTMLElement | null;
+    expect(menuContent).not.toBeNull();
+
+    expect(await within(menuContent!).findByText(/administrator\s*-\s*acme/i)).toBeInTheDocument();
   });
 
   it('fecha automaticamente ao sair de qualquer opção e permanecer fora por 300ms', async () => {
@@ -296,4 +333,31 @@ describe('TopMenu (menu de perfil)', () => {
       expect(screen.queryByText(/meu perfil/i)).not.toBeInTheDocument();
     });
   }, 15000);
+
+  it('exibe o módulo Configurações apenas para Administrador', async () => {
+    const { container } = render(
+      <TopMenu activeModule={undefined} onModuleChange={vi.fn()} />,
+    );
+
+    fireEvent.mouseEnter(container.firstElementChild!);
+
+    await waitFor(() => {
+      expect(screen.getByTitle('Configurações')).toBeInTheDocument();
+    });
+  });
+
+  it('oculta o módulo Configurações para usuário comum', async () => {
+    meRole = 'User';
+    const { container } = render(
+      <TopMenu activeModule={undefined} onModuleChange={vi.fn()} />,
+    );
+
+    fireEvent.mouseEnter(container.firstElementChild!);
+
+    await waitFor(() => {
+      expect((globalThis.fetch as any).mock.calls.length).toBeGreaterThan(0);
+    });
+
+    expect(screen.queryByTitle('Configurações')).not.toBeInTheDocument();
+  });
 });

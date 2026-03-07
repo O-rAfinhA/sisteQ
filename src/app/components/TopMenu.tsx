@@ -1,9 +1,10 @@
-import { useRef, useState, useMemo } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router';
 import { modules, Module } from '../config/modules';
 import { ChevronDown, Menu } from 'lucide-react';
 import { UserMenuMinimized } from './UserMenuMinimized';
 import { useFornecedores } from '../hooks/useFornecedores';
+import { getUserRoleFromSession, setUserRoleToSession } from '../utils/helpers';
 
 interface TopMenuProps {
   activeModule: Module | undefined;
@@ -15,12 +16,40 @@ export function TopMenu({ activeModule, onModuleChange }: TopMenuProps) {
   const [isMenuVisible, setIsMenuVisible] = useState(false);
   const [isPointerInside, setIsPointerInside] = useState(false);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const isPointerInsideRef = useRef(false);
   const isProfileMenuOpenRef = useRef(false);
   const suppressCloseUntilRef = useRef(0);
   const navigate = useNavigate();
   const location = useLocation();
   const { configuracao } = useFornecedores();
+
+  useEffect(() => {
+    let cancelled = false;
+    const cachedRole = getUserRoleFromSession();
+    if (cachedRole) setIsAdmin(cachedRole === 'Admin');
+
+    async function hydrateRole() {
+      try {
+        const res = await fetch('/api/profile/me', { method: 'GET', credentials: 'same-origin' });
+        const data = await res.json().catch(() => null);
+        if (!res.ok) {
+          if (res.status === 401) return;
+          return;
+        }
+        const role = typeof data?.user?.role === 'string' ? data.user.role : null;
+        if (cancelled) return;
+        setUserRoleToSession(role);
+        setIsAdmin(role === 'Admin');
+      } catch {
+      }
+    }
+
+    if (!cachedRole) hydrateRole();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Filtrar seções de módulos baseado em configurações
   const getFilteredSections = (mod: Module) => {
@@ -174,7 +203,7 @@ export function TopMenu({ activeModule, onModuleChange }: TopMenuProps) {
           {/* Configurações e UserMenu no extremo direito */}
           <div className="flex items-center gap-3">
             {modules
-              .filter((module) => module.id === 'configuracoes')
+              .filter((module) => module.id === 'configuracoes' && isAdmin)
               .map((module) => {
                 const Icon = module.icon;
                 const isActive = activeModule?.id === module.id;

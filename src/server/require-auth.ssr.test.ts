@@ -171,6 +171,62 @@ describe('SSR auth guard (catch-all)', () => {
     expect(after.props.routeKey).toBe('DirecionamentoEstrategico')
   })
 
+  it('bloqueia configurações para usuário não-admin', async () => {
+    const tenantSlug = `acme-${Date.now()}-${Math.random().toString(16).slice(2)}`
+    const { tenant, user: admin } = await registerTenantAndUser({
+      tenantSlug,
+      companyName: 'ACME',
+      name: 'Admin',
+      email: `admin-${Date.now()}-${Math.random()}@example.com`,
+      password: 'Senha@12345',
+    })
+
+    const email = `user-${Date.now()}-${Math.random()}@example.com`
+    const temporaryPassword = 'Senha@12345'
+    await createUserAsAdmin(tenant.id, admin.id, { name: 'Usuário', email, password: temporaryPassword })
+
+    const createdUser = await loginWithEmailPassword({
+      tenantId: tenant.id,
+      email,
+      password: temporaryPassword,
+      rateKey: `ssr:${tenant.id}:${email}`,
+    })
+    const cookie = cookieHeaderFromSetCookie(await createAuthCookiesForUser(createdUser))
+    await changePassword(tenant.id, createdUser.id, { currentPassword: temporaryPassword, newPassword: 'SenhaNova@123456' })
+
+    const ctxConfig: any = {
+      resolvedUrl: `/empresa/${encodeURIComponent(tenant.id)}/configuracoes/usuarios`,
+      query: {},
+      req: { headers: { cookie } },
+    }
+    const result: any = await getServerSideProps(ctxConfig)
+    expect(result.redirect).toBeTruthy()
+    expect(result.redirect.destination).toBe(`/empresa/${encodeURIComponent(tenant.id)}/gestao-estrategica`)
+  }, 15_000)
+
+  it('permite configurações para Administrador', async () => {
+    const tenantSlug = `acme-${Date.now()}-${Math.random().toString(16).slice(2)}`
+    const { user } = await registerTenantAndUser({
+      tenantSlug,
+      companyName: 'ACME',
+      name: 'Admin',
+      email: `admin-${Date.now()}-${Math.random()}@example.com`,
+      password: 'Senha@12345',
+    })
+    const cookie = cookieHeaderFromSetCookie(await createAuthCookiesForUser(user))
+
+    const ctxConfig: any = {
+      resolvedUrl: `/empresa/${encodeURIComponent(user.tenantId)}/configuracoes/usuarios`,
+      query: {},
+      req: { headers: { cookie } },
+    }
+    const result: any = await getServerSideProps(ctxConfig)
+    expect(result.redirect).toBeFalsy()
+    expect(result.props).toBeTruthy()
+    expect(result.props.routeKey).toBe('Usuarios')
+    expect(result.props.pathname).toBe('/configuracoes/usuarios')
+  })
+
   it('redireciona para next quando acessa /login autenticado', async () => {
     const { user } = await registerTenantAndUser({
       tenantSlug: 'acme',
