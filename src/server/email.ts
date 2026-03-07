@@ -26,6 +26,9 @@ function envText(key: string) {
   const raw = process.env[key]
   if (typeof raw !== 'string') return ''
   const v = raw.trim()
+  if (!v) return ''
+  if (v.startsWith('${') && v.endsWith('}')) return ''
+  if (v.includes('${')) return ''
   return v.length > 0 ? v : ''
 }
 

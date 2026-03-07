@@ -47,7 +47,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const result = await requestEmailVerification({ tenantId: tenant.id, email: body.email, rateKey })
 
       if (process.env.NODE_ENV !== 'production') {
-        res.status(200).json({ ok: true, emailServiceConfigured, dev: { verificationToken: result.token } })
+        res.status(200).json({ ok: true, emailServiceConfigured, emailSent: false, verificationMethod: 'token', dev: { verificationToken: result.token } })
         return
       }
 
@@ -81,7 +81,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         )
       }
 
-      res.status(200).json({ ok: true, emailServiceConfigured, emailSent, verificationUrl, verificationMethod: 'token' })
+      res.status(200).json({ ok: true, emailServiceConfigured, emailSent, verificationMethod: 'token' })
       return
     }
 
@@ -92,7 +92,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const result = await requestEmailVerificationCode({ tenantId: tenant.id, email: body.email, rateKey })
     if (process.env.NODE_ENV !== 'production') {
-      res.status(200).json({ ok: true, emailServiceConfigured, dev: { verificationCode: result.code } })
+      res.status(200).json({ ok: true, emailServiceConfigured, emailSent: false, verificationMethod: 'code', dev: { verificationCode: result.code } })
       return
     }
 

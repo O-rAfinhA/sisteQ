@@ -293,12 +293,14 @@ describe('Auth email verification flow', () => {
     )
   }, 20_000)
 
-  it('permite modo token em produção (sem Resend) e verifica via URL', async () => {
+  it('permite modo token em produção e verifica via token do e-mail enviado', async () => {
     const tmpDbPath = path.join(os.tmpdir(), `sisteq-auth-email-prod-token-${Date.now()}-${Math.random().toString(16).slice(2)}.json`)
     await withEnv(
       {
         NODE_ENV: 'production',
         SISTEQ_EMAIL_VERIFICATION_MODE: 'token',
+        SISTEQ_EMAIL_FROM: 'no-reply@example.com',
+        SISTEQ_SMTP_HOST: 'smtp.example.com',
         SISTEQ_ALLOW_FILE_FALLBACK: '1',
         SISTEQ_PROFILE_STORE: 'file',
         SISTEQ_PROFILE_DB_PATH: tmpDbPath,
@@ -307,7 +309,18 @@ describe('Auth email verification flow', () => {
         DATABASE_URL: undefined,
       },
       async () => {
+      const capturedUrls: string[] = []
       vi.resetModules()
+      vi.doMock('@/server/email', async () => {
+        const actual = await vi.importActual<any>('@/server/email')
+        return {
+          ...actual,
+          sendVerificationEmail: vi.fn(async (opts: any) => {
+            capturedUrls.push(String(opts?.verificationUrl || ''))
+            return { ok: true, provider: 'smtp', id: 'test' }
+          }),
+        }
+      })
       const { registerHandler, loginHandler, verifyEmailHandler } = await loadHandlers()
       const tenantSlug = `t-${Date.now()}-${Math.random().toString(16).slice(2)}`
       const email = `user-${Date.now()}-${Math.random()}@example.com`
@@ -323,9 +336,12 @@ describe('Auth email verification flow', () => {
       const reg = resRegister.getState()
       expect(reg.status).toBe(201)
       expect(reg.json.ok).toBe(true)
-      expect(typeof reg.json.verificationUrl).toBe('string')
+      expect(reg.json.verificationRequired).toBe(true)
+      expect(reg.json.verificationMethod).toBe('token')
+      expect(reg.json.emailSent).toBe(true)
 
-      const url = new URL(String(reg.json.verificationUrl))
+      expect(capturedUrls.length).toBe(1)
+      const url = new URL(String(capturedUrls[0]))
       const token = url.searchParams.get('token')
       expect(typeof token).toBe('string')
 
@@ -398,6 +414,8 @@ describe('Auth email verification flow', () => {
       {
         NODE_ENV: 'production',
         SISTEQ_EMAIL_VERIFICATION_MODE: 'token',
+        SISTEQ_EMAIL_FROM: 'no-reply@example.com',
+        SISTEQ_SMTP_HOST: 'smtp.example.com',
         SISTEQ_ALLOW_FILE_FALLBACK: '1',
         SISTEQ_PROFILE_STORE: 'file',
         SISTEQ_PROFILE_DB_PATH: tmpDbPath,
@@ -406,7 +424,18 @@ describe('Auth email verification flow', () => {
         DATABASE_URL: undefined,
       },
       async () => {
+        const capturedUrls: string[] = []
         vi.resetModules()
+        vi.doMock('@/server/email', async () => {
+          const actual = await vi.importActual<any>('@/server/email')
+          return {
+            ...actual,
+            sendVerificationEmail: vi.fn(async (opts: any) => {
+              capturedUrls.push(String(opts?.verificationUrl || ''))
+              return { ok: true, provider: 'smtp', id: 'test' }
+            }),
+          }
+        })
         const { registerHandler, resendHandler, verifyEmailHandler } = await loadHandlers()
         const tenantSlug = `t-${Date.now()}-${Math.random().toString(16).slice(2)}`
         const email = `user-${Date.now()}-${Math.random()}@example.com`
@@ -420,7 +449,8 @@ describe('Auth email verification flow', () => {
         const resRegister = createMockRes()
         await registerHandler(reqRegister, resRegister as any)
         expect(resRegister.getState().status).toBe(201)
-        const url1 = new URL(String(resRegister.getState().json.verificationUrl))
+        expect(capturedUrls.length).toBe(1)
+        const url1 = new URL(String(capturedUrls[0]))
         const token1 = url1.searchParams.get('token')
         expect(typeof token1).toBe('string')
 
@@ -433,7 +463,8 @@ describe('Auth email verification flow', () => {
         const resResend = createMockRes()
         await resendHandler(reqResend, resResend as any)
         expect(resResend.getState().status).toBe(200)
-        const url2 = new URL(String(resResend.getState().json.verificationUrl))
+        expect(capturedUrls.length).toBe(2)
+        const url2 = new URL(String(capturedUrls[1]))
         const token2 = url2.searchParams.get('token')
         expect(typeof token2).toBe('string')
         expect(token2).not.toBe(token1)

@@ -148,16 +148,12 @@ export default function Login() {
         headers: authHeaders,
         },
       );
-      if (result?.verificationUrl) {
-        window.location.href = result.verificationUrl;
-        return;
-      }
       if (result?.emailServiceConfigured === false) {
         toast.error('O serviço de e-mail não está configurado no momento.');
         return;
       }
-      setShowVerify(true);
       const method = String(result?.verificationMethod || '').trim().toLowerCase();
+      setShowVerify(method !== 'token');
       toast.success(method === 'token' ? 'Se o e-mail existir, enviaremos o link de verificação.' : 'Se o e-mail existir, enviaremos o código de verificação.');
     } catch (err: any) {
       toast.error(err?.message || 'Falha ao reenviar verificação');
@@ -227,6 +223,7 @@ export default function Login() {
       trackEvent('signup_submit', { next });
       const result = await apiJson<{
         ok: true;
+        emailServiceConfigured?: boolean;
         emailSent?: boolean;
         emailVerified?: boolean;
         verificationUrl?: string;
@@ -272,6 +269,23 @@ export default function Login() {
       if (result?.verificationUrl) {
         trackEvent('signup_success', { next, mode: 'email_verification_required' });
         window.location.href = result.verificationUrl;
+        return;
+      }
+
+      if (result?.emailServiceConfigured === false) {
+        toast.error('O serviço de e-mail não está configurado no momento.');
+        return;
+      }
+
+      if (String(result?.verificationMethod || '').trim().toLowerCase() === 'token') {
+        trackEvent('signup_success', { next, mode: 'email_verification_link_required' });
+        toast.success('Conta criada. Verifique seu e-mail para ativar o acesso.');
+        if (result?.emailSent === false) toast.error('Não foi possível enviar o e-mail agora. Use "Reenviar verificação".');
+        setMode('login');
+        setShowVerify(false);
+        setShowResend(true);
+        setPassword('');
+        setConfirmPassword('');
         return;
       }
 

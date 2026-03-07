@@ -7,7 +7,7 @@ import {
   registerTenantAndUser,
   verifyEmailByToken,
 } from '@/server/profile'
-import { sendVerificationCodeEmail, sendVerificationEmail } from '@/server/email'
+import { getEmailServiceConfigSummary, sendVerificationCodeEmail, sendVerificationEmail } from '@/server/email'
 
 function emailVerificationMode() {
   const raw = (process.env.SISTEQ_EMAIL_VERIFICATION_MODE || '').trim().toLowerCase()
@@ -40,6 +40,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   try {
     const { tenant, user } = await registerTenantAndUser((req.body ?? {}) as any)
     const mode = emailVerificationMode()
+    const emailServiceConfigured = getEmailServiceConfigSummary().configured
 
     if (mode === 'disabled') {
       const token = await createEmailVerificationToken(tenant.id, user.id)
@@ -67,6 +68,29 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const verificationUrl = `${proto}://${host}/api/auth/verify-email?token=${encodeURIComponent(token)}&tenant=${encodeURIComponent(
         tenant.slug,
       )}`
+
+      let emailSent = false
+      if (process.env.NODE_ENV === 'production') {
+        try {
+          await sendVerificationEmail({ to: String(user.email || '').trim().toLowerCase(), verificationUrl })
+          emailSent = true
+        } catch (e: any) {
+          emailSent = false
+          console.error(
+            JSON.stringify({
+              ts: new Date().toISOString(),
+              level: 'error',
+              scope: 'email',
+              event: 'auth.email.verification.send_failed',
+              provider: 'smtp',
+              tenantId: tenant.id,
+              userId: user.id,
+              error: String(e?.message || 'Falha ao enviar e-mail'),
+            }),
+          )
+        }
+      }
+
       console.info(
         JSON.stringify({
           ts: new Date().toISOString(),
@@ -77,9 +101,22 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           tenantId: tenant.id,
           userId: user.id,
           verificationMethod: 'token',
+          emailSent,
         }),
       )
-      res.status(201).json({ ok: true, emailSent: false, verificationUrl, verificationRequired: true, verificationMethod: 'token' })
+      if (process.env.NODE_ENV !== 'production') {
+        res.status(201).json({
+          ok: true,
+          emailServiceConfigured,
+          emailSent: false,
+          verificationUrl,
+          verificationRequired: true,
+          verificationMethod: 'token',
+          dev: { verificationToken: token },
+        })
+        return
+      }
+      res.status(201).json({ ok: true, emailServiceConfigured, emailSent, verificationRequired: true, verificationMethod: 'token' })
       return
     }
 
@@ -101,13 +138,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       )
       res
         .status(201)
-        .json({ ok: true, emailSent: false, verificationRequired: true, verificationMethod: 'code', dev: { verificationCode: issued.code } })
+        .json({
+          ok: true,
+          emailServiceConfigured,
+          emailSent: false,
+          verificationRequired: true,
+          verificationMethod: 'code',
+          dev: { verificationCode: issued.code },
+        })
       return
     }
 
     let emailSent = false
     try {
-      await sendVerificationCodeEmail({ to: user.email, code: issued.code, expiresMinutes: 15 })
+      await sendVerificationCodeEmail({ to: String(user.email || '').trim().toLowerCase(), code: issued.code, expiresMinutes: 15 })
       emailSent = true
     } catch (e: any) {
       emailSent = false
@@ -138,7 +182,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         emailSent,
       }),
     )
-    res.status(201).json({ ok: true, emailSent, verificationRequired: true, verificationMethod: 'code' })
+    res.status(201).json({ ok: true, emailServiceConfigured, emailSent, verificationRequired: true, verificationMethod: 'code' })
   } catch (e: any) {
     if (e instanceof AuthError) {
       res.status(401).json({ error: e.message })
