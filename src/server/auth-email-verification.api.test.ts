@@ -578,4 +578,58 @@ describe('Auth email verification flow', () => {
       },
     )
   })
+
+  it('em produção, expõe emailServiceConfigured=false quando SMTP não está configurado', async () => {
+    await withEnv(
+      {
+        NODE_ENV: 'production',
+        SISTEQ_EMAIL_VERIFICATION_MODE: 'code',
+        SISTEQ_ALLOW_FILE_FALLBACK: '1',
+        SISTEQ_PROFILE_STORE: 'file',
+        SISTEQ_PROFILE_DB_PATH: tmpProfileDbPath('sisteq-auth-email-prod-smtp-missing'),
+        SISTEQ_TENANT_KV_DB_PATH: tmpTenantKvDbPath('sisteq-auth-email-prod-smtp-missing-kv'),
+        SISTEQ_EMAIL_DOMAIN_CHECK: '0',
+        DATABASE_URL: undefined,
+      },
+      async () => {
+        vi.resetModules()
+        const { registerHandler, resendHandler } = await loadHandlers()
+        const healthHandler = (await import('../../pages/api/health')).default
+
+        const tenantSlug = `t-${Date.now()}-${Math.random().toString(16).slice(2)}`
+        const email = `user-${Date.now()}-${Math.random()}@example.com`
+        const password = 'Senha@12345'
+
+        const reqRegister: any = {
+          method: 'POST',
+          headers: {},
+          body: { tenantSlug, companyName: 'Empresa', name: 'Admin', email, password },
+        }
+        const resRegister = createMockRes()
+        await registerHandler(reqRegister, resRegister as any)
+        expect(resRegister.getState().status).toBe(201)
+
+        const reqResend: any = {
+          method: 'POST',
+          headers: { 'x-tenant': tenantSlug },
+          body: { email },
+          socket: { remoteAddress: '127.0.0.1' },
+        }
+        const resResend = createMockRes()
+        await resendHandler(reqResend, resResend as any)
+        const resend = resResend.getState()
+        expect(resend.status).toBe(200)
+        expect(resend.json.ok).toBe(true)
+        expect(resend.json.emailServiceConfigured).toBe(false)
+
+        const reqHealth: any = { method: 'GET', headers: {} }
+        const resHealth = createMockRes()
+        await healthHandler(reqHealth, resHealth as any)
+        const health = resHealth.getState()
+        expect(health.status).toBe(200)
+        expect(health.json.ok).toBe(true)
+        expect(health.json.email?.configured).toBe(false)
+      },
+    )
+  }, 20_000)
 })

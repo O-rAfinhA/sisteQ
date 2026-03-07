@@ -134,17 +134,31 @@ export default function Login() {
     }
     setResendLoading(true);
     try {
-      const result = await apiJson<{ ok: true; verificationUrl?: string; verificationMethod?: string }>('/api/auth/resend-verification', {
+      const result = await apiJson<{
+        ok: true;
+        emailServiceConfigured?: boolean;
+        emailSent?: boolean;
+        verificationUrl?: string;
+        verificationMethod?: string;
+      }>(
+        '/api/auth/resend-verification',
+        {
         method: 'POST',
         body: JSON.stringify({ email: emailTrim }),
         headers: authHeaders,
-      });
+        },
+      );
       if (result?.verificationUrl) {
         window.location.href = result.verificationUrl;
         return;
       }
+      if (result?.emailServiceConfigured === false) {
+        toast.error('O serviço de e-mail não está configurado no momento.');
+        return;
+      }
       setShowVerify(true);
-      toast.success('Se o e-mail existir, enviaremos o código de verificação.');
+      const method = String(result?.verificationMethod || '').trim().toLowerCase();
+      toast.success(method === 'token' ? 'Se o e-mail existir, enviaremos o link de verificação.' : 'Se o e-mail existir, enviaremos o código de verificação.');
     } catch (err: any) {
       toast.error(err?.message || 'Falha ao reenviar verificação');
     } finally {

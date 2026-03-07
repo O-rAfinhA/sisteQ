@@ -1,6 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { AuthError, requestEmailVerification, requestEmailVerificationCode, requireTenantFromRequest } from '@/server/profile'
-import { sendVerificationCodeEmail, sendVerificationEmail } from '@/server/email'
+import { getEmailServiceConfigSummary, sendVerificationCodeEmail, sendVerificationEmail } from '@/server/email'
 
 function emailVerificationMode() {
   const raw = (process.env.SISTEQ_EMAIL_VERIFICATION_MODE || '').trim().toLowerCase()
@@ -42,16 +42,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const email = typeof body.email === 'string' ? body.email : ''
     const rateKey = `${getClientIp(req)}:${tenant.id}:${email.trim().toLowerCase()}:resend`
     const mode = emailVerificationMode()
+    const emailServiceConfigured = getEmailServiceConfigSummary().configured
     if (mode === 'token') {
       const result = await requestEmailVerification({ tenantId: tenant.id, email: body.email, rateKey })
 
       if (process.env.NODE_ENV !== 'production') {
-        res.status(200).json({ ok: true, dev: { verificationToken: result.token } })
+        res.status(200).json({ ok: true, emailServiceConfigured, dev: { verificationToken: result.token } })
         return
       }
 
       if (!result.token) {
-        res.status(200).json({ ok: true, emailSent: false })
+        res.status(200).json({ ok: true, emailServiceConfigured, emailSent: false, verificationMethod: 'token' })
         return
       }
 
@@ -80,23 +81,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         )
       }
 
-      res.status(200).json({ ok: true, emailSent, verificationUrl })
+      res.status(200).json({ ok: true, emailServiceConfigured, emailSent, verificationUrl, verificationMethod: 'token' })
       return
     }
 
     if (mode === 'disabled') {
-      res.status(200).json({ ok: true, emailSent: false })
+      res.status(200).json({ ok: true, emailServiceConfigured, emailSent: false, verificationMethod: 'disabled' })
       return
     }
 
     const result = await requestEmailVerificationCode({ tenantId: tenant.id, email: body.email, rateKey })
     if (process.env.NODE_ENV !== 'production') {
-      res.status(200).json({ ok: true, dev: { verificationCode: result.code } })
+      res.status(200).json({ ok: true, emailServiceConfigured, dev: { verificationCode: result.code } })
       return
     }
 
     if (!result.code) {
-      res.status(200).json({ ok: true, emailSent: false })
+      res.status(200).json({ ok: true, emailServiceConfigured, emailSent: false, verificationMethod: 'code' })
       return
     }
 
@@ -119,7 +120,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       )
     }
 
-    res.status(200).json({ ok: true, emailSent, verificationMethod: 'code' })
+    res.status(200).json({ ok: true, emailServiceConfigured, emailSent, verificationMethod: 'code' })
   } catch (e: any) {
     if (e instanceof AuthError) {
       res.status(400).json({ error: e.message })
