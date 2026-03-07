@@ -139,6 +139,59 @@ describe('Auth email verification flow', () => {
     )
   }, 20_000)
 
+  it('permite login quando modo disabled mesmo se usuário ainda não verificou', async () => {
+    await withEnv(
+      {
+        SISTEQ_PROFILE_STORE: 'file',
+        SISTEQ_PROFILE_DB_PATH: tmpProfileDbPath('sisteq-auth-email-disabled-login'),
+        SISTEQ_TENANT_KV_DB_PATH: tmpTenantKvDbPath('sisteq-auth-email-disabled-login-kv'),
+        SISTEQ_SESSION_SECRET: 'test-secret',
+        SISTEQ_EMAIL_VERIFICATION_MODE: 'required',
+        SISTEQ_EMAIL_DOMAIN_CHECK: '0',
+        DATABASE_URL: undefined,
+      },
+      async () => {
+        vi.resetModules()
+        const { registerHandler, loginHandler } = await loadHandlers()
+        const tenantSlug = `t-${Date.now()}-${Math.random().toString(16).slice(2)}`
+        const email = `user-${Date.now()}-${Math.random()}@example.com`
+        const password = 'Senha@12345'
+
+        const reqRegister: any = {
+          method: 'POST',
+          headers: {},
+          body: { tenantSlug, companyName: 'Empresa', name: 'Admin', email, password },
+        }
+        const resRegister = createMockRes()
+        await registerHandler(reqRegister, resRegister as any)
+        expect(resRegister.getState().status).toBe(201)
+
+        const reqLoginBefore: any = {
+          method: 'POST',
+          headers: { 'x-tenant': tenantSlug },
+          body: { email, password },
+          socket: { remoteAddress: '127.0.0.1' },
+        }
+        const resLoginBefore = createMockRes()
+        await loginHandler(reqLoginBefore, resLoginBefore as any)
+        expect(resLoginBefore.getState().status).toBe(401)
+        expect(String(resLoginBefore.getState().json?.error || '')).toMatch(/não verificado/i)
+
+        process.env.SISTEQ_EMAIL_VERIFICATION_MODE = 'disabled'
+
+        const reqLoginAfter: any = {
+          method: 'POST',
+          headers: { 'x-tenant': tenantSlug },
+          body: { email, password },
+          socket: { remoteAddress: '127.0.0.1' },
+        }
+        const resLoginAfter = createMockRes()
+        await loginHandler(reqLoginAfter, resLoginAfter as any)
+        expect(resLoginAfter.getState().status).toBe(200)
+      },
+    )
+  }, 20_000)
+
   it('reenvia código em dev e permite confirmar', async () => {
     await withEnv(
       {

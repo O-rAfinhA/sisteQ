@@ -321,6 +321,15 @@ function emailDomainCheckEnabled() {
   return process.env.NODE_ENV === 'production'
 }
 
+function emailVerificationMode() {
+  const raw =
+    typeof process.env.SISTEQ_EMAIL_VERIFICATION_MODE === 'string' ? process.env.SISTEQ_EMAIL_VERIFICATION_MODE.trim().toLowerCase() : ''
+  if (raw === 'disabled' || raw === 'token' || raw === 'required' || raw === 'code') {
+    return raw as 'disabled' | 'token' | 'required' | 'code'
+  }
+  return 'required' as const
+}
+
 function extractEmailDomain(email: string) {
   const s = email.trim().toLowerCase()
   const at = s.lastIndexOf('@')
@@ -1192,7 +1201,16 @@ export async function loginWithEmailPassword(opts: {
   if (!user.passwordHash) throw new AuthError('Use login com Google')
   const ok = await verifyPassword(password, user.passwordHash)
   if (!ok) throw new AuthError('Credenciais inválidas')
-  if (!user.emailVerifiedAt) throw new AuthError('E-mail não verificado')
+  if (!user.emailVerifiedAt) {
+    const mode = emailVerificationMode()
+    if (mode === 'disabled') {
+      const token = await createEmailVerificationToken(opts.tenantId, user.id)
+      await verifyEmailByToken(token)
+      user.emailVerifiedAt = user.emailVerifiedAt || nowIso()
+    } else {
+      throw new AuthError('E-mail não verificado')
+    }
+  }
 
   audit('auth.login.password.success', { tenantId: opts.tenantId, userId: user.id })
   return user
