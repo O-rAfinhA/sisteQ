@@ -69,8 +69,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     try {
       await sendVerificationCodeEmail({ to: user.email, code: issued.code, expiresMinutes: 15 })
       emailSent = true
-    } catch {
+    } catch (e: any) {
       emailSent = false
+      console.error(
+        JSON.stringify({
+          ts: new Date().toISOString(),
+          level: 'error',
+          scope: 'email',
+          event: 'auth.email.verification.send_failed',
+          provider: 'smtp',
+          tenantId: tenant.id,
+          userId: user.id,
+          error: String(e?.message || 'Falha ao enviar e-mail'),
+        }),
+      )
     }
 
     res.status(201).json({ ok: true, emailSent, verificationRequired: true, verificationMethod: 'code' })

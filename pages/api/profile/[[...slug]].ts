@@ -25,7 +25,7 @@ import {
   updatePreferences,
   updatePrivacy,
 } from '@/server/profile'
-import { sendWelcomeEmail } from '@/server/email'
+import { getEmailServiceConfigSummary, getEmailServiceRuntimeStats, probeEmailService, sendWelcomeEmail } from '@/server/email'
 import {
   deleteTenantKvValue,
   deleteTenantKvValues,
@@ -290,6 +290,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return
     }
 
+    if (slug.length === 2 && slug[0] === 'email' && slug[1] === 'health') {
+      await assertAdmin(auth.tenantId, auth.userId)
+      if (req.method !== 'GET') {
+        res.setHeader('Allow', 'GET')
+        res.status(405).json({ error: 'Method Not Allowed' })
+        return
+      }
+      const config = getEmailServiceConfigSummary()
+      const probe = await probeEmailService()
+      const stats = getEmailServiceRuntimeStats()
+      res.status(200).json({ config, probe, stats })
+      return
+    }
+
     if (slug.length === 1 && slug[0] === 'kv') {
       const activeModuleId = safeStringHeader(req.headers['x-sisteq-module-id'])
       if (req.method === 'GET') {
@@ -485,8 +499,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               temporaryPassword,
             })
             emailSent = true
-          } catch {
+          } catch (e: any) {
             emailSent = false
+            console.error(
+              JSON.stringify({
+                ts: new Date().toISOString(),
+                level: 'error',
+                scope: 'email',
+                event: 'admin.welcome_email.send_failed',
+                provider: 'smtp',
+                tenantId: auth.tenantId,
+                actorUserId: auth.userId,
+                userId: user.id,
+                error: String(e?.message || 'Falha ao enviar e-mail'),
+              }),
+            )
           }
         }
 

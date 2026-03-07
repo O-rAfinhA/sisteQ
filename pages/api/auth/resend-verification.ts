@@ -65,8 +65,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       try {
         await sendVerificationEmail({ to: email.trim().toLowerCase(), verificationUrl })
         emailSent = true
-      } catch {
+      } catch (e: any) {
         emailSent = false
+        console.error(
+          JSON.stringify({
+            ts: new Date().toISOString(),
+            level: 'error',
+            scope: 'email',
+            event: 'auth.email.verification.send_failed',
+            provider: 'smtp',
+            tenantId: tenant.id,
+            error: String(e?.message || 'Falha ao enviar e-mail'),
+          }),
+        )
       }
 
       res.status(200).json({ ok: true, emailSent, verificationUrl })
@@ -93,8 +104,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     try {
       await sendVerificationCodeEmail({ to: email.trim().toLowerCase(), code: result.code, expiresMinutes: 15 })
       emailSent = true
-    } catch {
+    } catch (e: any) {
       emailSent = false
+      console.error(
+        JSON.stringify({
+          ts: new Date().toISOString(),
+          level: 'error',
+          scope: 'email',
+          event: 'auth.email.verification.send_failed',
+          provider: 'smtp',
+          tenantId: tenant.id,
+          error: String(e?.message || 'Falha ao enviar e-mail'),
+        }),
+      )
     }
 
     res.status(200).json({ ok: true, emailSent, verificationMethod: 'code' })
