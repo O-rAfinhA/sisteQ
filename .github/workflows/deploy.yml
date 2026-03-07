@@ -45,7 +45,17 @@ jobs:
             ghcr.io/${{ github.repository }}:${{ github.sha }}
             ghcr.io/${{ github.repository }}:latest
 
-      - name: Deploy via SSH (Swarm)
+      - name: Build and push migrate image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: migrate
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:migrate-${{ github.sha }}
+            ghcr.io/${{ github.repository }}:migrate-latest
+
+      - name: Deploy via SSH (Docker Compose)
         uses: appleboy/ssh-action@v1.2.1
         with:
           host: ${{ secrets.DO_SSH_HOST }}
@@ -61,6 +71,13 @@ jobs:
               set +a
             fi
             export SISTEQ_IMAGE="ghcr.io/${{ github.repository }}:${{ github.sha }}"
+            export SISTEQ_MIGRATE_IMAGE="ghcr.io/${{ github.repository }}:migrate-${{ github.sha }}"
             docker login ghcr.io -u "${{ github.actor }}" -p "${{ secrets.GHCR_TOKEN }}"
-            docker swarm init 2>/dev/null || true
-            docker stack deploy -c deploy/stack.yml sisteq --with-registry-auth
+            docker pull "$SISTEQ_MIGRATE_IMAGE"
+            docker run --rm \
+              -e DATABASE_URL="${DATABASE_URL:-}" \
+              -e PGSSLMODE="${PGSSLMODE:-require}" \
+              "$SISTEQ_MIGRATE_IMAGE"
+            docker compose pull app
+            docker compose up -d --remove-orphans
+            docker image prune -f
