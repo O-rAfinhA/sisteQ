@@ -71,6 +71,25 @@ export async function sendVerificationEmail(opts: { to: string; verificationUrl:
   return await sendEmail({ to: opts.to, subject, html, text })
 }
 
+export async function sendVerificationCodeEmail(opts: { to: string; code: string; expiresMinutes: number }) {
+  const subject = 'Seu código de verificação'
+  const code = String(opts.code || '').trim()
+  const minutes = Number.isFinite(opts.expiresMinutes) ? opts.expiresMinutes : 15
+  const html = `
+    <div style="font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; line-height: 1.4;">
+      <h2 style="margin: 0 0 12px;">Verificação de e-mail</h2>
+      <p style="margin: 0 0 12px;">Use o código abaixo para confirmar seu e-mail:</p>
+      <div style="margin: 0 0 12px; padding: 12px 16px; border: 1px solid #e5e7eb; border-radius: 10px; display: inline-block; letter-spacing: 4px; font-size: 20px; font-weight: 700;">
+        ${code}
+      </div>
+      <p style="margin: 0 0 12px; color: #555;">Este código expira em ${minutes} minutos.</p>
+      <p style="margin: 0; color: #555;">Se você não solicitou esta conta, ignore este e-mail.</p>
+    </div>
+  `.trim()
+  const text = `Código de verificação: ${code}\nExpira em ${minutes} minutos.`
+  return await sendEmail({ to: opts.to, subject, html, text })
+}
+
 export async function sendWelcomeEmail(opts: {
   to: string
   name: string

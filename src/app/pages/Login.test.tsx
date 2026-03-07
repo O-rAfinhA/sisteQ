@@ -32,4 +32,26 @@ describe('Login', () => {
     expect(screen.getByLabelText(/^senha$/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/confirmar senha/i)).toBeInTheDocument();
   });
+
+  it('exibe formulário de código quando login falha por e-mail não verificado', async () => {
+    const fetchMock = vi.fn(async () => {
+      return {
+        ok: false,
+        status: 401,
+        json: async () => ({ error: 'E-mail não verificado' }),
+      } as any;
+    });
+    (globalThis as any).fetch = fetchMock;
+
+    render(<Login />);
+
+    fireEvent.change(screen.getByLabelText(/organização/i), { target: { value: 'acme' } });
+    fireEvent.change(screen.getByLabelText(/^e-mail$/i), { target: { value: 'user@example.com' } });
+    fireEvent.change(screen.getByLabelText(/^senha$/i), { target: { value: 'Senha@12345' } });
+
+    fireEvent.click(screen.getByRole('button', { name: /^entrar$/i }));
+
+    expect(await screen.findByLabelText(/código de verificação/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /confirmar e-mail/i })).toBeInTheDocument();
+  });
 });

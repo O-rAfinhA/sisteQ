@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import path from 'path'
 import os from 'os'
 import registerHandler from '../../pages/api/auth/register'
@@ -58,7 +58,7 @@ function tmpProfileDbPath(prefix: string) {
 }
 
 describe('Auth email verification flow', () => {
-  it('bloqueia login até verificar e permite verificar com token', async () => {
+  it('bloqueia login até verificar e permite verificar com código', async () => {
     await withEnv(
       {
         SISTEQ_PROFILE_STORE: 'file',
@@ -81,8 +81,8 @@ describe('Auth email verification flow', () => {
         const reg = resRegister.getState()
         expect(reg.status).toBe(201)
         expect(reg.json.ok).toBe(true)
-        const token = reg.json?.dev?.verificationToken
-        expect(typeof token).toBe('string')
+        const code = reg.json?.dev?.verificationCode
+        expect(typeof code).toBe('string')
 
         const reqLoginBefore: any = {
           method: 'POST',
@@ -96,7 +96,7 @@ describe('Auth email verification flow', () => {
         expect(before.status).toBe(401)
         expect(String(before.json?.error || '')).toMatch(/não verificado/i)
 
-        const reqVerify: any = { method: 'POST', headers: {}, body: { token } }
+        const reqVerify: any = { method: 'POST', headers: { 'x-tenant': tenantSlug }, body: { email, code } }
         const resVerify = createMockRes()
         await verifyEmailHandler(reqVerify, resVerify as any)
         const verified = resVerify.getState()
@@ -118,7 +118,7 @@ describe('Auth email verification flow', () => {
     )
   }, 20_000)
 
-  it('reenvia token em dev e GET redireciona para /login com parâmetros', async () => {
+  it('reenvia código em dev e permite confirmar', async () => {
     await withEnv(
       {
         SISTEQ_PROFILE_STORE: 'file',
@@ -151,22 +151,111 @@ describe('Auth email verification flow', () => {
         const resend = resResend.getState()
         expect(resend.status).toBe(200)
         expect(resend.json.ok).toBe(true)
-        const token = resend.json?.dev?.verificationToken
-        expect(typeof token).toBe('string')
+        const code = resend.json?.dev?.verificationCode
+        expect(typeof code).toBe('string')
 
-        const reqVerifyGet: any = {
-          method: 'GET',
+        const reqVerify: any = { method: 'POST', headers: { 'x-tenant': tenantSlug }, body: { email, code } }
+        const resVerify = createMockRes()
+        await verifyEmailHandler(reqVerify, resVerify as any)
+        expect(resVerify.getState().status).toBe(200)
+      },
+    )
+  }, 20_000)
+
+  it('retorna erro específico para código inválido, expirado e limite excedido', async () => {
+    await withEnv(
+      {
+        SISTEQ_PROFILE_STORE: 'file',
+        SISTEQ_PROFILE_DB_PATH: tmpProfileDbPath('sisteq-auth-email-code-errors'),
+        SISTEQ_SESSION_SECRET: 'test-secret',
+        DATABASE_URL: undefined,
+      },
+      async () => {
+        vi.useFakeTimers()
+        vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'))
+        const tenantSlug = `t-${Date.now()}-${Math.random().toString(16).slice(2)}`
+        const email = `user-${Date.now()}-${Math.random()}@example.com`
+        const password = 'Senha@12345'
+
+        const reqRegister: any = {
+          method: 'POST',
           headers: {},
-          query: { token, tenant: tenantSlug, next: '/perfil' },
+          body: { tenantSlug, companyName: 'Empresa', name: 'Admin', email, password },
         }
-        const resVerifyGet = createMockRes()
-        await verifyEmailHandler(reqVerifyGet, resVerifyGet as any)
-        const redir = resVerifyGet.getState().redirect
-        expect(redir?.status).toBe(302)
-        expect(String(redir?.url || '')).toMatch(/^\/login\?/)
-        expect(String(redir?.url || '')).toMatch(/verified=1/)
-        expect(String(redir?.url || '')).toMatch(/tenant=/)
-        expect(String(redir?.url || '')).toMatch(/next=%2Fperfil/)
+        const resRegister = createMockRes()
+        await registerHandler(reqRegister, resRegister as any)
+        const reg = resRegister.getState()
+        const code = reg.json?.dev?.verificationCode
+        expect(typeof code).toBe('string')
+
+        const wrongCode = 'AAAAAA'
+        for (let i = 0; i < 4; i++) {
+          const reqBad: any = { method: 'POST', headers: { 'x-tenant': tenantSlug }, body: { email, code: wrongCode } }
+          const resBad = createMockRes()
+          await verifyEmailHandler(reqBad, resBad as any)
+          expect(resBad.getState().status).toBe(400)
+          expect(String(resBad.getState().json?.error || '')).toMatch(/código inválido/i)
+        }
+        const reqLock: any = { method: 'POST', headers: { 'x-tenant': tenantSlug }, body: { email, code: wrongCode } }
+        const resLock = createMockRes()
+        await verifyEmailHandler(reqLock, resLock as any)
+        expect(resLock.getState().status).toBe(400)
+        expect(String(resLock.getState().json?.error || '')).toMatch(/limite de tentativas excedido/i)
+
+        const tenantSlug2 = `t2-${Date.now()}-${Math.random().toString(16).slice(2)}`
+        const email2 = `user2-${Date.now()}-${Math.random()}@example.com`
+        vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'))
+        const reqRegister2: any = {
+          method: 'POST',
+          headers: {},
+          body: { tenantSlug: tenantSlug2, companyName: 'Empresa', name: 'Admin', email: email2, password },
+        }
+        const resRegister2 = createMockRes()
+        await registerHandler(reqRegister2, resRegister2 as any)
+        const code2 = resRegister2.getState().json?.dev?.verificationCode
+        expect(typeof code2).toBe('string')
+
+        vi.setSystemTime(new Date('2026-01-01T00:16:00.000Z'))
+        const reqExpired: any = { method: 'POST', headers: { 'x-tenant': tenantSlug2 }, body: { email: email2, code: code2 } }
+        const resExpired = createMockRes()
+        await verifyEmailHandler(reqExpired, resExpired as any)
+        expect(resExpired.getState().status).toBe(400)
+        expect(String(resExpired.getState().json?.error || '')).toMatch(/código expirado/i)
+        vi.useRealTimers()
+      },
+    )
+  }, 20_000)
+
+  it('responde em menos de 2 segundos para cadastro + verificação por código', async () => {
+    await withEnv(
+      {
+        SISTEQ_PROFILE_STORE: 'file',
+        SISTEQ_PROFILE_DB_PATH: tmpProfileDbPath('sisteq-auth-email-code-perf'),
+        SISTEQ_SESSION_SECRET: 'test-secret',
+        DATABASE_URL: undefined,
+      },
+      async () => {
+        const start = Date.now()
+        const tenantSlug = `t-${Date.now()}-${Math.random().toString(16).slice(2)}`
+        const email = `user-${Date.now()}-${Math.random()}@example.com`
+        const password = 'Senha@12345'
+
+        const reqRegister: any = {
+          method: 'POST',
+          headers: {},
+          body: { tenantSlug, companyName: 'Empresa', name: 'Admin', email, password },
+        }
+        const resRegister = createMockRes()
+        await registerHandler(reqRegister, resRegister as any)
+        const code = resRegister.getState().json?.dev?.verificationCode
+        expect(typeof code).toBe('string')
+
+        const reqVerify: any = { method: 'POST', headers: { 'x-tenant': tenantSlug }, body: { email, code } }
+        const resVerify = createMockRes()
+        await verifyEmailHandler(reqVerify, resVerify as any)
+        expect(resVerify.getState().status).toBe(200)
+
+        expect(Date.now() - start).toBeLessThan(2_000)
       },
     )
   }, 20_000)

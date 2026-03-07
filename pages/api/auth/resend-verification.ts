@@ -1,10 +1,12 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
-import { AuthError, requestEmailVerification, requireTenantFromRequest } from '@/server/profile'
-import { sendVerificationEmail } from '@/server/email'
+import { AuthError, requestEmailVerification, requestEmailVerificationCode, requireTenantFromRequest } from '@/server/profile'
+import { sendVerificationCodeEmail, sendVerificationEmail } from '@/server/email'
 
 function emailVerificationMode() {
   const raw = (process.env.SISTEQ_EMAIL_VERIFICATION_MODE || '').trim().toLowerCase()
-  if (raw === 'disabled' || raw === 'token' || raw === 'required') return raw as 'disabled' | 'token' | 'required'
+  if (raw === 'disabled' || raw === 'token' || raw === 'required' || raw === 'code') {
+    return raw as 'disabled' | 'token' | 'required' | 'code'
+  }
   return 'required' as const
 }
 
@@ -39,44 +41,63 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const body = (req.body ?? {}) as any
     const email = typeof body.email === 'string' ? body.email : ''
     const rateKey = `${getClientIp(req)}:${tenant.id}:${email.trim().toLowerCase()}:resend`
-    const result = await requestEmailVerification({ tenantId: tenant.id, email: body.email, rateKey })
-
-    if (process.env.NODE_ENV !== 'production') {
-      res.status(200).json({ ok: true, dev: { verificationToken: result.token } })
-      return
-    }
-
-    if (!result.token) {
-      res.status(200).json({ ok: true, emailSent: false })
-      return
-    }
-
-    const proto = getProto(req)
-    const host = getHost(req)
-    const verificationUrl = `${proto}://${host}/api/auth/verify-email?token=${encodeURIComponent(result.token)}&tenant=${encodeURIComponent(
-      tenant.slug,
-    )}`
-
     const mode = emailVerificationMode()
+    if (mode === 'token') {
+      const result = await requestEmailVerification({ tenantId: tenant.id, email: body.email, rateKey })
+
+      if (process.env.NODE_ENV !== 'production') {
+        res.status(200).json({ ok: true, dev: { verificationToken: result.token } })
+        return
+      }
+
+      if (!result.token) {
+        res.status(200).json({ ok: true, emailSent: false })
+        return
+      }
+
+      const proto = getProto(req)
+      const host = getHost(req)
+      const verificationUrl = `${proto}://${host}/api/auth/verify-email?token=${encodeURIComponent(result.token)}&tenant=${encodeURIComponent(
+        tenant.slug,
+      )}`
+
+      let emailSent = false
+      try {
+        await sendVerificationEmail({ to: email.trim().toLowerCase(), verificationUrl })
+        emailSent = true
+      } catch {
+        emailSent = false
+      }
+
+      res.status(200).json({ ok: true, emailSent, verificationUrl })
+      return
+    }
+
     if (mode === 'disabled') {
       res.status(200).json({ ok: true, emailSent: false })
       return
     }
 
-    if (mode === 'token') {
-      res.status(200).json({ ok: true, emailSent: false, verificationUrl })
+    const result = await requestEmailVerificationCode({ tenantId: tenant.id, email: body.email, rateKey })
+    if (process.env.NODE_ENV !== 'production') {
+      res.status(200).json({ ok: true, dev: { verificationCode: result.code } })
+      return
+    }
+
+    if (!result.code) {
+      res.status(200).json({ ok: true, emailSent: false })
       return
     }
 
     let emailSent = false
     try {
-      await sendVerificationEmail({ to: email.trim().toLowerCase(), verificationUrl })
+      await sendVerificationCodeEmail({ to: email.trim().toLowerCase(), code: result.code, expiresMinutes: 15 })
       emailSent = true
     } catch {
       emailSent = false
     }
 
-    res.status(200).json({ ok: true, emailSent })
+    res.status(200).json({ ok: true, emailSent, verificationMethod: 'code' })
   } catch (e: any) {
     if (e instanceof AuthError) {
       res.status(400).json({ error: e.message })

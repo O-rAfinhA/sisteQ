@@ -70,6 +70,13 @@ export type UserProfile = {
   updatedAt: string
   passwordHash: string | null
   emailVerifiedAt: string | null
+  emailVerification?: {
+    codeHash: string
+    salt: string
+    expiresAt: string
+    attempts: number
+    sentAt: string
+  } | null
   googleSub?: string
   preferences: ProfilePreferences
   notificationSettings: ProfileNotificationSettings
@@ -1130,14 +1137,68 @@ async function consumeOneTimeToken(
   return rec
 }
 
+function normalizeVerificationCode(codeRaw: unknown) {
+  if (typeof codeRaw !== 'string') return ''
+  return codeRaw.replace(/[\s-]+/g, '').trim().toUpperCase()
+}
+
+function verificationCodePepper() {
+  const raw = typeof process.env.SISTEQ_EMAIL_VERIFICATION_PEPPER === 'string' ? process.env.SISTEQ_EMAIL_VERIFICATION_PEPPER : ''
+  return raw.trim()
+}
+
+function hashVerificationCode(code: string, salt: string) {
+  const pepper = verificationCodePepper()
+  return sha256Hex(`${salt}:${code}:${pepper}`)
+}
+
+function generateVerificationCode() {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+  let out = ''
+  for (let i = 0; i < 6; i++) {
+    out += alphabet[crypto.randomInt(0, alphabet.length)]
+  }
+  return out
+}
+
+function verifyCodeHashMatches(code: string, salt: string, expectedHash: string) {
+  const actual = hashVerificationCode(code, salt)
+  try {
+    const a = Buffer.from(actual, 'hex')
+    const b = Buffer.from(expectedHash, 'hex')
+    if (a.length !== b.length) return false
+    return crypto.timingSafeEqual(a, b)
+  } catch {
+    return false
+  }
+}
+
 export async function createEmailVerificationToken(tenantId: string, userId: string) {
   return createOneTimeToken('emailVerificationTokens', tenantId, userId, 60 * 60 * 24)
+}
+
+export async function createEmailVerificationCode(tenantId: string, userId: string) {
+  const code = generateVerificationCode()
+  const salt = crypto.randomBytes(16).toString('hex')
+  const rec = {
+    codeHash: hashVerificationCode(code, salt),
+    salt,
+    expiresAt: addSecondsIso(60 * 15),
+    attempts: 0,
+    sentAt: nowIso(),
+  }
+  await mutateUser(tenantId, userId, u => {
+    u.emailVerification = rec
+  })
+  audit('auth.email.verification.code.issued', { tenantId, userId })
+  return { code, expiresAt: rec.expiresAt }
 }
 
 export async function verifyEmailByToken(tokenRaw: string) {
   const rec = await consumeOneTimeToken('emailVerificationTokens', tokenRaw)
   await mutateUser(rec.tenantId, rec.userId, u => {
     u.emailVerifiedAt = u.emailVerifiedAt || nowIso()
+    u.emailVerification = null
     u.activity.unshift({
       id: randomId('act'),
       type: 'profile.updated',
@@ -1146,6 +1207,67 @@ export async function verifyEmailByToken(tokenRaw: string) {
     })
   })
   audit('auth.email.verified', { tenantId: rec.tenantId, userId: rec.userId })
+  return { ok: true }
+}
+
+export async function verifyEmailByCode(tenantId: string, emailRaw: unknown, codeRaw: unknown) {
+  assertValidEmail(emailRaw, 'E-mail')
+  const email = normalizeEmail(String(emailRaw))
+  const code = normalizeVerificationCode(codeRaw)
+  if (code.length !== 6) throw new AuthError('Código inválido')
+
+  const db = await readDb()
+  const key = db.userByTenantEmail[userEmailKey(tenantId, email)]
+  const current = key ? db.users[key] : null
+  if (!current || current.disabledAt) throw new AuthError('Código inválido')
+  if (current.emailVerifiedAt) return { ok: true }
+  const verification = current?.emailVerification ?? null
+  if (!verification || typeof verification !== 'object') throw new AuthError('Código inválido')
+
+  const nowMs = Date.now()
+  const expiresMs = new Date(String(verification.expiresAt || '')).getTime()
+  if (!expiresMs || expiresMs <= nowMs) {
+    current.emailVerification = null
+    current.updatedAt = nowIso()
+    db.users[key] = current
+    await writeDb(db)
+    audit('auth.email.verification.code.expired', { tenantId, userId: current.id })
+    throw new AuthError('Código expirado')
+  }
+
+  const attempts = typeof (verification as any).attempts === 'number' ? (verification as any).attempts : 0
+  if (attempts >= 5) {
+    audit('auth.email.verification.code.locked', { tenantId, userId: current.id })
+    throw new AuthError('Limite de tentativas excedido')
+  }
+
+  const salt = typeof (verification as any).salt === 'string' ? (verification as any).salt : ''
+  const codeHash = typeof (verification as any).codeHash === 'string' ? (verification as any).codeHash : ''
+  const ok = salt && codeHash && verifyCodeHashMatches(code, salt, codeHash)
+
+  if (!ok) {
+    const nextAttempts = attempts + 1
+    current.emailVerification = { ...(verification as any), attempts: nextAttempts }
+    current.updatedAt = nowIso()
+    db.users[key] = current
+    await writeDb(db)
+    audit('auth.email.verification.code.invalid', { tenantId, userId: current.id, attempts: nextAttempts })
+    if (nextAttempts >= 5) throw new AuthError('Limite de tentativas excedido')
+    throw new AuthError('Código inválido')
+  }
+
+  current.emailVerifiedAt = current.emailVerifiedAt || nowIso()
+  current.emailVerification = null
+  current.activity.unshift({
+    id: randomId('act'),
+    type: 'profile.updated',
+    createdAt: nowIso(),
+    metadata: { emailVerified: true },
+  })
+  current.updatedAt = nowIso()
+  db.users[key] = current
+  await writeDb(db)
+  audit('auth.email.verified', { tenantId, userId: current.id })
   return { ok: true }
 }
 
@@ -1175,6 +1297,24 @@ export async function requestEmailVerification(opts: {
   const token = await createOneTimeToken('emailVerificationTokens', opts.tenantId, user.id, 60 * 60 * 24)
   audit('auth.email.verification.requested', { tenantId: opts.tenantId, userId: user.id })
   return { ok: true as const, token, alreadyVerified: false as const }
+}
+
+export async function requestEmailVerificationCode(opts: {
+  tenantId: string
+  email: unknown
+  rateKey: string
+}) {
+  assertValidEmail(opts.email, 'E-mail')
+  const email = normalizeEmail(String(opts.email))
+  checkAuthRateLimit(opts.rateKey)
+
+  const user = await findUserByEmail(opts.tenantId, email)
+  if (!user || user.disabledAt) return { ok: true as const, code: null as string | null, expiresAt: null as string | null, alreadyVerified: false as const }
+  if (user.emailVerifiedAt) return { ok: true as const, code: null as string | null, expiresAt: null as string | null, alreadyVerified: true as const }
+
+  const { code, expiresAt } = await createEmailVerificationCode(opts.tenantId, user.id)
+  audit('auth.email.verification.code.requested', { tenantId: opts.tenantId, userId: user.id })
+  return { ok: true as const, code, expiresAt, alreadyVerified: false as const }
 }
 
 export async function resetPasswordWithToken(tokenRaw: unknown, newPasswordRaw: unknown) {

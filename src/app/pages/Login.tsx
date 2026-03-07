@@ -60,6 +60,10 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [showResend, setShowResend] = useState(false);
   const [resendLoading, setResendLoading] = useState(false);
+  const [showVerify, setShowVerify] = useState(false);
+  const [verificationCode, setVerificationCode] = useState('');
+  const [verifyLoading, setVerifyLoading] = useState(false);
+  const [verifiedByCode, setVerifiedByCode] = useState(false);
 
   useEffect(() => {
     if (mode === 'register') {
@@ -94,6 +98,8 @@ export default function Login() {
     e.preventDefault();
     setLoading(true);
     setShowResend(false);
+    setShowVerify(false);
+    setVerifiedByCode(false);
     try {
       await apiJson<{ user: any }>('/api/auth/login', {
         method: 'POST',
@@ -110,7 +116,10 @@ export default function Login() {
       }
     } catch (err: any) {
       const msg = String(err?.message || 'Falha ao entrar');
-      if (/e-?mail não verificado/i.test(msg)) setShowResend(true);
+      if (/e-?mail não verificado/i.test(msg)) {
+        setShowResend(true);
+        setShowVerify(true);
+      }
       toast.error(msg);
     } finally {
       setLoading(false);
@@ -125,7 +134,7 @@ export default function Login() {
     }
     setResendLoading(true);
     try {
-      const result = await apiJson<{ ok: true; verificationUrl?: string }>('/api/auth/resend-verification', {
+      const result = await apiJson<{ ok: true; verificationUrl?: string; verificationMethod?: string }>('/api/auth/resend-verification', {
         method: 'POST',
         body: JSON.stringify({ email: emailTrim }),
         headers: authHeaders,
@@ -134,11 +143,43 @@ export default function Login() {
         window.location.href = result.verificationUrl;
         return;
       }
-      toast.success('Se o e-mail existir, enviaremos o link de verificação.');
+      setShowVerify(true);
+      toast.success('Se o e-mail existir, enviaremos o código de verificação.');
     } catch (err: any) {
       toast.error(err?.message || 'Falha ao reenviar verificação');
     } finally {
       setResendLoading(false);
+    }
+  };
+
+  const handleVerifyEmailCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const emailTrim = email.trim();
+    const codeTrim = verificationCode.replace(/[\s-]+/g, '').trim().toUpperCase();
+    if (!emailTrim) {
+      toast.error('Informe o e-mail para verificar');
+      return;
+    }
+    if (!codeTrim) {
+      toast.error('Informe o código recebido');
+      return;
+    }
+    setVerifyLoading(true);
+    try {
+      await apiJson<{ ok: true }>('/api/auth/verify-email', {
+        method: 'POST',
+        body: JSON.stringify({ email: emailTrim, code: codeTrim }),
+        headers: authHeaders,
+      });
+      setVerifiedByCode(true);
+      setShowResend(false);
+      setShowVerify(false);
+      setVerificationCode('');
+      toast.success('E-mail confirmado com sucesso.');
+    } catch (err: any) {
+      toast.error(err?.message || 'Falha ao confirmar e-mail');
+    } finally {
+      setVerifyLoading(false);
     }
   };
 
@@ -175,7 +216,9 @@ export default function Login() {
         emailSent?: boolean;
         emailVerified?: boolean;
         verificationUrl?: string;
-        dev?: { verificationToken?: string };
+        verificationRequired?: boolean;
+        verificationMethod?: string;
+        dev?: { verificationCode?: string };
       }>('/api/auth/register', {
         method: 'POST',
         body: JSON.stringify({
@@ -187,12 +230,13 @@ export default function Login() {
         }),
       });
 
-      const verificationToken = result?.dev?.verificationToken;
-      if (verificationToken) {
+      const verificationCode = result?.dev?.verificationCode;
+      if (verificationCode) {
         trackEvent('signup_success', { next, mode: 'dev_auto_verify' });
         await apiJson<{ ok: true }>('/api/auth/verify-email', {
           method: 'POST',
-          body: JSON.stringify({ token: verificationToken }),
+          body: JSON.stringify({ email, code: verificationCode }),
+          headers: authHeaders,
         });
         await apiJson<{ user: any }>('/api/auth/login', {
           method: 'POST',
@@ -222,8 +266,19 @@ export default function Login() {
         return;
       }
 
-      toast.success('Conta criada. Verifique seu e-mail para ativar o acesso.');
-      if (result?.emailSent === false) toast.error('Não foi possível enviar o e-mail agora. Use "Reenviar verificação".');
+      if (result?.verificationRequired || result?.verificationMethod === 'code') {
+        trackEvent('signup_success', { next, mode: 'email_verification_code_required' });
+        toast.success('Conta criada. Digite o código enviado por e-mail para ativar o acesso.');
+        if (result?.emailSent === false) toast.error('Não foi possível enviar o e-mail agora. Use "Reenviar verificação".');
+        setMode('login');
+        setShowVerify(true);
+        setShowResend(true);
+        setPassword('');
+        setConfirmPassword('');
+        return;
+      }
+
+      toast.success('Conta criada.');
       setMode('login');
       setPassword('');
       setConfirmPassword('');
@@ -255,6 +310,30 @@ export default function Login() {
             <div className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800 mb-4">
               E-mail confirmado com sucesso. Você já pode entrar.
             </div>
+          )}
+          {verifiedByCode && (
+            <div className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800 mb-4">
+              E-mail confirmado com sucesso. Você já pode entrar.
+            </div>
+          )}
+          {mode === 'login' && showVerify && (
+            <form onSubmit={handleVerifyEmailCode} className="space-y-3 mb-4">
+              <div className="space-y-2">
+                <Label htmlFor="verificationCode">Código de verificação</Label>
+                <Input
+                  id="verificationCode"
+                  value={verificationCode}
+                  onChange={e => setVerificationCode(e.target.value)}
+                  placeholder="Ex: A1B2C3"
+                  autoComplete="one-time-code"
+                  disabled={loading || resendLoading || verifyLoading}
+                />
+              </div>
+              <Button type="submit" className="w-full" disabled={loading || resendLoading || verifyLoading}>
+                {verifyLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Confirmar e-mail
+              </Button>
+            </form>
           )}
           <form
             onSubmit={mode === 'login' ? handleLogin : mode === 'forgot' ? handleForgot : handleRegister}

@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
-import { AuthError, verifyEmailByToken } from '@/server/profile'
+import { AuthError, requireTenantFromRequest, verifyEmailByCode, verifyEmailByToken } from '@/server/profile'
 
 function safeNext(value: unknown) {
   if (typeof value !== 'string') return ''
@@ -17,7 +17,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
-    const token =
+    const tokenRaw =
       method === 'GET'
         ? typeof req.query.token === 'string'
           ? req.query.token
@@ -25,24 +25,33 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         : typeof (req.body as any)?.token === 'string'
           ? String((req.body as any).token)
           : ''
+    const token = String(tokenRaw || '').trim()
 
-    if (!token) {
+    if (token) {
+      await verifyEmailByToken(token)
+
+      if (method === 'GET') {
+        const tenant = typeof req.query.tenant === 'string' ? req.query.tenant.trim() : ''
+        const next = safeNext(req.query.next)
+        const sp = new URLSearchParams()
+        sp.set('verified', '1')
+        if (tenant) sp.set('tenant', tenant)
+        if (next) sp.set('next', next)
+        res.redirect(302, `/login?${sp.toString()}`)
+        return
+      }
+      res.status(200).json({ ok: true })
+      return
+    }
+
+    if (method === 'GET') {
       res.status(400).json({ error: 'Token ausente' })
       return
     }
 
-    await verifyEmailByToken(token)
-
-    if (method === 'GET') {
-      const tenant = typeof req.query.tenant === 'string' ? req.query.tenant.trim() : ''
-      const next = safeNext(req.query.next)
-      const sp = new URLSearchParams()
-      sp.set('verified', '1')
-      if (tenant) sp.set('tenant', tenant)
-      if (next) sp.set('next', next)
-      res.redirect(302, `/login?${sp.toString()}`)
-      return
-    }
+    const tenant = await requireTenantFromRequest(req)
+    const body = (req.body ?? {}) as any
+    await verifyEmailByCode(tenant.id, body.email, body.code)
     res.status(200).json({ ok: true })
   } catch (e: any) {
     if (e instanceof AuthError) {
